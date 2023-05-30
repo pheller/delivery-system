@@ -50,7 +50,7 @@ defmodule Prodigy.Server.Protocol.Tcs do
   end
 
   @impl true
-  def start_link(ref, transport, options) do
+  def start_link(ref, _socket, transport, options) do
     Logger.debug("TCS Connection Opened")
     {:ok, :proc_lib.spawn_link(__MODULE__, :init, [{ref, transport, options}])}
   end
@@ -208,13 +208,13 @@ defmodule Prodigy.Server.Protocol.Tcs do
   end
 
   @impl GenServer
-  def terminate(reason, state) do
-    Logger.debug("TCS server shutting down: #{inspect(reason)}")
-    :normal
+  def handle_info({:EXIT, _pid, _reason}, state) do
+    {:stop, :normal, state}
   end
 
   @impl GenServer
-  def handle_info({:EXIT, _pid, _reason}, state) do
-    {:stop, :normal, state}
+  def terminate(reason, _state) do
+    Logger.debug("TCS server shutting down: #{inspect(reason)}")
+    :normal
   end
 end

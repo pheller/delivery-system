@@ -210,7 +210,7 @@ defmodule Prodigy.Server.Service.Messaging do
 
     Logger.debug("delete message indices: #{inspect indices}")
 
-    {:ok, message} =
+    {:ok, _message} =
       Repo.transaction(fn ->
         Message
         |> Ecto.Query.where([m], m.to_id == ^user.id)
@@ -248,7 +248,7 @@ defmodule Prodigy.Server.Service.Messaging do
     do_disposition(rest, user)
   end
 
-  defp do_disposition(<< 0xff >>, user) do
+  defp do_disposition(<< 0xff >>, _user) do
     # done
     Logger.debug("done processing dispositions")
   end
@@ -275,9 +275,9 @@ defmodule Prodigy.Server.Service.Messaging do
         <<0x1, 0x2, payload::binary>> ->
           internal_send_message(session.user, payload)
 
-        <<0x4, rest::binary>> ->
+        <<0x4, _rest::binary>> ->
           do_disposition(payload, session.user) # deletes
-        <<0x5, rest::binary>> ->
+        <<0x5, _rest::binary>> ->
           do_disposition(payload, session.user) # retains
 
         _ ->
