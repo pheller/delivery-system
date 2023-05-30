@@ -41,7 +41,7 @@ defmodule Server.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ranch, "~> 2.1.0"},
+      {:ranch, "~> 1.8.0"},
       {:crc, "~> 0.10.4"},
       {:enum_type, "~> 1.1.0"},
       {:calendar, "~> 1.0.0"},

@@ -23,3 +23,6 @@ if System.get_env("RELEASE_MODE") do
     hostname: System.fetch_env!("DB_HOST"),
     show_sensitive_data_on_connection_error: true
 end
+
+if config_env() == :prod do
+end
