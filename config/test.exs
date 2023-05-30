@@ -15,6 +15,13 @@
 
 import Config
 
+# We don't run a server during test. If one is required,
+# you can enable the server option below.
+config :portal, Prodigy.Portal.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4002],
+  secret_key_base: "iVDT09ynvP5ZjrhiDGoDessLMIH4RzYKMo3t2R9xvxZsJr0I4+BMgrmIZ5jQ3llj",
+  server: false
+
 config :core, Prodigy.Core.Data.Repo,
   database: "prodigytest",
   username: "prodigytest",
