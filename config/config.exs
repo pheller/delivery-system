@@ -15,6 +15,44 @@
 
 import Config
 
+config :portal,
+  namespace: Prodigy.Portal,
+  ecto_repos: [Prodigy.Core.Data.Repo],
+  generators: [context_app: false]
+
+# Configures the endpoint
+config :portal, Prodigy.Portal.Endpoint,
+  url: [host: "localhost"],
+  render_errors: [
+    formats: [html: Prodigy.Portal.ErrorHTML, json: Prodigy.Portal.ErrorJSON],
+    layout: false
+  ],
+  pubsub_server: Prodigy.Portal.PubSub,
+  live_view: [signing_salt: "oxOjAYBY"],
+  server: true
+
+# Configure esbuild (the version is required)
+config :esbuild,
+  version: "0.17.11",
+  default: [
+    args:
+      ~w(js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../apps/portal/assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
+
+# Configure tailwind (the version is required)
+config :tailwind,
+  version: "3.2.7",
+  default: [
+    args: ~w(
+      --config=tailwind.config.js
+      --input=css/app.css
+      --output=../priv/static/assets/app.css
+    ),
+    cd: Path.expand("../apps/portal/assets", __DIR__)
+  ]
+
 config :server,
   ecto_repos: [Prodigy.Core.Data.Repo],
   auth_timeout: 60 * 1000

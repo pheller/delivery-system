@@ -86,7 +86,7 @@ defmodule Prodigy.Server.Protocol.Tcs.Test do
 
   setup do
     {:ok, socket} = TestTransport.start_link({})
-    {:ok, tcsp} = TcsProtocol.start_link(socket, TestTransport, @options)
+    {:ok, tcsp} = TcsProtocol.start_link(socket, nil, TestTransport, @options)
     :ok = wait_for(fn -> GenServer.call(tcsp, :get_dia_pid) != nil end, @timeout)
     dia_pid = GenServer.call(tcsp, :get_dia_pid)
 
