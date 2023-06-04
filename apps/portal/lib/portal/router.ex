@@ -18,6 +18,13 @@ defmodule Prodigy.Portal.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/project", PageController, :project
+    get "/news", PageController, :news
+    get "/get-started", PageController, :get_started
+    get "/login", PageController, :login
+    get "/account", PageController, :account
+
+    get "/users", UsersController, :index
   end
 
   # Other scopes may use custom stacks.
