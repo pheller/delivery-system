@@ -17,10 +17,10 @@ defmodule Prodigy.Portal.Router do
   scope "/", Prodigy.Portal do
     pipe_through :browser
 
-    get "/", PageController, :home
-    get "/project", PageController, :project
+    live "/", HomeLive
+    live "/project", ProjectLive
     get "/news", PageController, :news
-    get "/get-started", PageController, :get_started
+    live "/get-started", GetStartedLive
     get "/login", PageController, :login
     get "/account", PageController, :account
 
