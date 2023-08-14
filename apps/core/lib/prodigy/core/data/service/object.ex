@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -13,29 +13,22 @@
 # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
 # see <https://www.gnu.org/licenses/>.
 
-defmodule Prodigy.Core.Data.DataCollectionPolicy do
+defmodule Prodigy.Core.Data.Service.Object do
   use Ecto.Schema
 
   @moduledoc """
-  Schema specific to user-specific Data Collection elements
+  Schema specific objects
   """
 
   @primary_key false
-  schema "data_collection_policy" do
-    field(:user_id, :string, primary_key: true)
-    field(:template, :boolean)
-    field(:element, :boolean)
-    field(:ad, :boolean)
-    field(:pwindow, :boolean)
-    field(:commit, :boolean)
-    field(:next, :boolean)
-    field(:back, :boolean)
-    field(:jump, :boolean)
-    field(:help, :boolean)
-    field(:path, :boolean)
-    field(:undo, :boolean)
-    field(:exit, :boolean)
-    field(:look, :boolean)
-    field(:action, :boolean)
+  schema "object" do
+    field(:name, :string, primary_key: true)
+    field(:sequence, :integer, primary_key: true)
+    field(:type, :integer, primary_key: true)
+    field(:version, :integer, primary_key: true)
+    field(:contents, :binary)
   end
 end
+
+# object_id is 13 bytes comprised of concatenation of name (11), sequence, type.
+# there should be uniqueness of (name, sequence, type, version)

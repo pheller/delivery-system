@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -24,7 +24,7 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
   require Mix
   require Logger
 
-  alias Prodigy.Core.Data.{Household, User}
+  alias Prodigy.Core.Data.Service.{Household, User}
   alias Prodigy.Server.Protocol.Dia.Packet, as: DiaPacket
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Router

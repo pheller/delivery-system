@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
 # see <https://www.gnu.org/licenses/>.
 
-defmodule Prodigy.Core.Data.User do
+defmodule Prodigy.Core.Data.Service.User do
   use Ecto.Schema
 
   @moduledoc """
@@ -22,8 +22,8 @@ defmodule Prodigy.Core.Data.User do
 
   @primary_key {:id, :string, []}
   schema "user" do
-    belongs_to(:household, Prodigy.Core.Data.Household, type: :string)
-    has_one(:data_collection_policy, Prodigy.Core.Data.DataCollectionPolicy)
+    belongs_to(:household, Prodigy.Core.Data.Service.Household, type: :string)
+    has_one(:data_collection_policy, Prodigy.Core.Data.Service.DataCollectionPolicy)
     field(:password, Comeonin.Ecto.Password)
     field(:gender, :string)
     field(:date_enrolled, :date)

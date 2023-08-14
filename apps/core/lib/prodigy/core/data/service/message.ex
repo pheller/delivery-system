@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
 # see <https://www.gnu.org/licenses/>.
 
-defmodule Prodigy.Core.Data.Message do
+defmodule Prodigy.Core.Data.Service.Message do
   use Ecto.Schema
 
   @moduledoc """

@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -26,7 +26,8 @@ defmodule Prodigy.Server.Service.Logon do
   import Prodigy.Core.Util
 
   alias Comeonin.Ecto.Password
-  alias Prodigy.Core.Data.{Repo, User}
+  alias Prodigy.Core.Data.Repo
+  alias Prodigy.Core.Data.Service.User
   alias Prodigy.Server.Protocol.Dia.Packet
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Service.Messaging

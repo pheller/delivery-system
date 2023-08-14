@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -20,7 +20,7 @@ defmodule Prodigy.Server.Service.Messaging.Test do
 
   import Ecto.Changeset
 
-  alias Prodigy.Core.Data.{Household, Message, User}
+  alias Prodigy.Core.Data.Service.{Household, Message, User}
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Router
   alias Prodigy.Server.Service.Messaging

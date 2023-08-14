@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
 # see <https://www.gnu.org/licenses/>.
 
-defmodule Prodigy.Core.Data.Session do
+defmodule Prodigy.Core.Data.Service.Session do
   use Ecto.Schema
 
   @moduledoc """
@@ -21,7 +21,7 @@ defmodule Prodigy.Core.Data.Session do
   """
 
   schema "session" do
-    belongs_to(:user, Prodigy.Core.Data.User)
+    belongs_to(:user, Prodigy.Core.Data.Service.User)
     field(:logon_timestamp, :utc_datetime)
     field(:logon_status, :integer)                # enroll, success, etc; this can be a small integer or enum
     field(:logoff_timestamp, :utc_datetime)

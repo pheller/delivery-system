@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -16,7 +16,8 @@
 defmodule Import do
   @moduledoc false
 
-  alias Prodigy.Core.Data.{Object, Repo}
+  alias Prodigy.Core.Data.Repo
+  alias Prodigy.Core.Data.Service.Object
 
   import Ecto.Changeset
 

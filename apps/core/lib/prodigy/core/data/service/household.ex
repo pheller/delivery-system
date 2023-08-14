@@ -1,4 +1,4 @@
-# Copyright 2022, Phillip Heller
+# Copyright 2022-2023, Phillip Heller
 #
 # This file is part of Prodigy Reloaded.
 #
@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
 # see <https://www.gnu.org/licenses/>.
 
-defmodule Prodigy.Core.Data.Household do
+defmodule Prodigy.Core.Data.Service.Household do
   use Ecto.Schema
 
   @moduledoc """
@@ -22,7 +22,7 @@ defmodule Prodigy.Core.Data.Household do
 
   @primary_key {:id, :string, []}
   schema "household" do
-    has_many(:users, Prodigy.Core.Data.User)
+    has_many(:users, Prodigy.Core.Data.Service.User)
     field(:address_1, :string)
     field(:address_2, :string)
     field(:city, :string)
