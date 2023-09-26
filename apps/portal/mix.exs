@@ -10,6 +10,7 @@ defmodule Prodigy.Portal.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.14",
+<<<<<<< HEAD
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
@@ -20,6 +21,15 @@ defmodule Prodigy.Portal.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test"]
   defp elixirc_paths(_), do: ["lib"]
 
+=======
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
+      deps: deps()
+    ]
+  end
+
+>>>>>>> 3f7cfb9999bf8d9a3d2597e76c150df3ac53b12e
   # Configuration for the OTP application.
   #
   # Type `mix help compile.app` for more information.
