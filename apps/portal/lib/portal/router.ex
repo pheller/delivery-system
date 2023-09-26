@@ -14,17 +14,35 @@ defmodule Prodigy.Portal.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :auth do
+    plug Prodigy.Portal.UserManager.Pipeline
+  end
+
+  pipeline :ensure_auth do
+    plug Guardian.Plug.EnsureAuthenticated
+  end
+
   scope "/", Prodigy.Portal do
-    pipe_through :browser
+    pipe_through [:browser, :auth]
 
     live "/", HomeLive
     live "/project", ProjectLive
     get "/news", PageController, :news
     live "/get-started", GetStartedLive
-    get "/login", PageController, :login
+
+    get "/login", SessionController, :new
+    post "/login", SessionController, :login
+    get "/logout", SessionController, :logout
     get "/account", PageController, :account
 
-    get "/users", UsersController, :index
+    #get "/users", UsersController, :index
+    live "/users", UsersLive
+  end
+
+  scope "/", Prodigy.Portal do
+    pipe_through [:browser, :auth, :ensure_auth]
+
+    get "/protected", PageController, :protected
   end
 
   # Other scopes may use custom stacks.

@@ -18,5 +18,22 @@ services:
       - DB_PASS=prodigy
       - DB_HOST=db
       - MIX_ENV=prod
+      - SECRET_KEY_BASE=r6ygfUoemC9s6HPcZYwm9EGAC/+Xt6NmcvAidvW7wN2Yd2k3TpuetRZTB5Juvvy0
     depends_on:
       - db
+  portal:
+    build:
+      context: .
+      dockerfile: apps/portal/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - DB_NAME=prodigy
+      - DB_USER=prodigy
+      - DB_PASS=prodigy
+      - DB_HOST=db
+      - MIX_ENV=prod
+      - SECRET_KEY_BASE=r6ygfUoemC9s6HPcZYwm9EGAC/+Xt6NmcvAidvW7wN2Yd2k3TpuetRZTB5Juvvy0
+    depends_on:
+      - db
+

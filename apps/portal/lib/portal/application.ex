@@ -12,6 +12,7 @@ defmodule Prodigy.Portal.Application do
       Prodigy.Portal.Telemetry,
       # Start the Endpoint (http/https)
       Prodigy.Portal.Endpoint,
+      {Prodigy.Core.Data.Repo, []},
       # Start a worker by calling: Prodigy.Portal.Worker.start_link(arg)
       # {Prodigy.Portal.Worker, arg}
       {Phoenix.PubSub, name: Prodigy.Portal.PubSub}

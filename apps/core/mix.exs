@@ -28,7 +28,8 @@ defmodule Prodigy.Core.MixProject do
       {:ecto_sql, "~> 3.0"},
       {:ecto_psql_extras, "~> 0.6"},
       {:postgrex, "~> 0.17.1"},
-      {:comeonin_ecto_password, "~> 3.0.0"}
+      {:comeonin_ecto_password, "~> 3.0.0"},
+      {:pbkdf2_elixir, "~> 1.0"}
     ]
   end
 end

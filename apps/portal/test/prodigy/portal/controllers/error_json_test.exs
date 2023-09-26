@@ -1,5 +1,5 @@
 defmodule Prodigy.Portal.ErrorJSONTest do
-  use Prodigy.Portal.ConnCase, async: true
+  use Prodigy.Portal.RepoCase, async: true
 
   test "renders 404" do
     assert Prodigy.Portal.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}

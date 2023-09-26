@@ -10,12 +10,15 @@ defmodule Prodigy.Portal.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.14",
-      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
+      deps: deps(),
       aliases: aliases(),
-      deps: deps()
+      elixirc_paths: elixirc_paths(Mix.env())
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Configuration for the OTP application.
   #
@@ -26,10 +29,6 @@ defmodule Prodigy.Portal.MixProject do
       extra_applications: [:logger, :runtime_tools, :os_mon]
     ]
   end
-
-  # Specifies which paths to compile per environment.
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
 
   # Specifies your project dependencies.
   #
@@ -49,7 +48,10 @@ defmodule Prodigy.Portal.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.2"},
-      {:plug_cowboy, "~> 2.5"}
+      {:plug_cowboy, "~> 2.5"},
+      {:guardian, "~> 2.3"},
+      {:pbkdf2_elixir, "~> 1.0"},
+      {:core, in_umbrella: true}
     ]
   end
 

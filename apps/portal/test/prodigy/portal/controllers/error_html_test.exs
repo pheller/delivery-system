@@ -1,5 +1,5 @@
 defmodule Prodigy.Portal.ErrorHTMLTest do
-  use Prodigy.Portal.ConnCase, async: true
+  use Prodigy.Portal.RepoCase, async: true
 
   # Bring render_to_string/4 for testing custom views
   import Phoenix.Template
