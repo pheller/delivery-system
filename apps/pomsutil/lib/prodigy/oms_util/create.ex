@@ -20,27 +20,36 @@ defmodule Create do
 
   import Ecto.Changeset
 
-  def exec(_argv, _args \\ %{}) do
+  def exec(argv, %{id: id} = args) do
     # TODO add support for arguments [XXXX[YY]] [password]
     # TODO retry in the case we try to insert an already existing value
     # TODO use a sequence to create in predictable order and avoid retries
     # TODO add mechanism for excluded IDs
 
-    new_household = random_id()
-    new_password = random_password()
+    {household, password} = case id do
+      :assign ->
+        {random_id(), random_password()}
+      _ ->
+        password = case length(argv) do
+          1 -> Enum.at(argv, 0)
+          _ -> random_password()
+        end
+
+        {id, password}
+    end
 
     today = DateTime.to_date(DateTime.utc_now())
 
-    %Household{id: new_household, enabled_date: today}
+    %Household{id: household, enabled_date: today}
     |> change
     |> put_assoc(:users, [
-      %User{id: new_household <> "A"}
-      |> User.changeset(%{password: new_password})
+      %User{id: household <> "A"}
+      |> User.changeset(%{password: password})
     ])
     |> Repo.insert()
 
-    IO.puts("- Created Household #{new_household}")
-    IO.puts("- Created User #{new_household <> "A"} with password #{new_password}")
+    IO.puts("- Created Household #{household}")
+    IO.puts("- Created User #{household <> "A"} with password #{password}")
   end
 
   defp random(x) do

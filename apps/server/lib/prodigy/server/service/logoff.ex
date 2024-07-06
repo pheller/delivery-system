@@ -23,7 +23,7 @@ defmodule Prodigy.Server.Service.Logoff do
   require Ecto.Query
   import Ecto.Changeset
 
-  alias Prodigy.Core.Data.{Repo, User}
+  alias Prodigy.Core.Data.{Message, Repo, User}
   alias Prodigy.Server.Protocol.Dia.Packet, as: DiaPacket
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Session
@@ -45,6 +45,26 @@ defmodule Prodigy.Server.Service.Logoff do
       prf_last_logon_time: Timex.format!(now, "{h24}.{m}")
     })
     |> Repo.update()
+
+    # changes for VCFWEST
+
+    if user_id == "IBMZ99A" || user_id == "MACZ99A" do
+      Logger.info("Reset enrollment experience")
+
+      # delete email
+      Message
+      |> Ecto.Query.where([message], message.to_id == ^user_id)
+      |> Repo.delete_all()
+
+      # reset password end enrollment flag
+      user
+      |> change(%{
+        date_enrolled: nil,
+        password: "VCFWEST"
+      })
+      |> Repo.update()
+    end
+
 
     Logger.info("User #{user_id} logged off (#{reason})")
     :ok

@@ -130,14 +130,14 @@ defmodule Prodigy.OmsUtil.CLI do
         ListAccount.exec(:user, rest, args)
 
       "create" ->
-        id =
+        {id, rest} =
           case length(rest) do
             0 ->
-              :assign
+              {:assign, []}
 
             _ ->
-              [id | _rest] = rest
-              id
+              [id | rest] = rest
+              {id, rest}
           end
 
         args = %{
