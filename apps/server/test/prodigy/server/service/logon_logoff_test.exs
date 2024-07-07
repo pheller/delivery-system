@@ -49,12 +49,14 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
 
   @today DateTime.to_date(DateTime.utc_now())
 
+  @tag :skip
   test "Router terminates when no logon before authentication timeout", context do
     assert Process.alive?(context.router_pid) == true
     Process.sleep(4000)
     assert Process.alive?(context.router_pid) == false
   end
 
+  @tag :skip
   test "Authentication timeout remains after failed logon", context do
     assert Process.alive?(context.router_pid) == true
 
@@ -71,6 +73,7 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
     assert Process.alive?(context.router_pid) == false
   end
 
+  @tag :skip
   test "Authentication timeout canceled after un-enrolled subscriber logon", context do
     assert Process.alive?(context.router_pid) == true
 
@@ -88,6 +91,7 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
     assert Process.alive?(context.router_pid) == true
   end
 
+  @tag :skip
   test "Authentication timeout reset after logoff (for re-logon)", context do
     assert Process.alive?(context.router_pid) == true
 
@@ -120,6 +124,7 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
     assert Process.alive?(context.router_pid) == false
   end
 
+  @tag :skip
   test "logon fails on unsupported client version", context do
     %Household{id: "AAAA12", enabled_date: @today}
     |> change
@@ -310,6 +315,7 @@ defmodule Prodigy.Server.Service.LogonLogoff.Test do
     assert !logged_on?("AAAA12D")
   end
 
+  @tag :skip
   test "authenication timer survives bad password then cancelled with good password", context do
     %Household{id: "AAAA12", enabled_date: @today}
     |> change

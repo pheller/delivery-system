@@ -260,13 +260,14 @@ defmodule Prodigy.Server.Service.Logon do
   end
 
   defp version_ok(version) do
-    if version in ["06.03.10", "06.03.17"] do
-      Logger.debug("User is connecting with RS #{version}")
-      true
-    else
-      Logger.warn("User is connecting with an unacceptable software version")
-      :bad_version
-    end
+#    if version in ["06.03.10", "06.03.17"] do
+#      Logger.debug("User is connecting with RS #{version}")
+#      true
+#    else
+#      Logger.warn("User is connecting with an unacceptable software version")
+#      :bad_version
+#    end
+    true
   end
 
   def handle(
