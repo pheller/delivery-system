@@ -6,7 +6,7 @@ defmodule Prodigy.Portal.ProjectLive do
     {:ok, socket}
   end
 
-  def handle_params(unsigned_params, uri, socket) do
+  def handle_params(_unsigned_params, _uri, socket) do
     {:noreply, socket}
   end
 end

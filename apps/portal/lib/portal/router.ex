@@ -35,14 +35,23 @@ defmodule Prodigy.Portal.Router do
     get "/logout", SessionController, :logout
     get "/account", PageController, :account
 
-    #get "/users", UsersController, :index
+    # get "/users", UsersController, :index
     live "/users", UsersLive
+
+    get "/enrollment", EnrollmentController, :new
   end
 
   scope "/", Prodigy.Portal do
     pipe_through [:browser, :auth, :ensure_auth]
 
     get "/protected", PageController, :protected
+  end
+
+  scope "/auth", Prodigy.Portal do
+    pipe_through :browser
+
+    get "/:provider", AuthController, :request
+    get "/:provider/callback", AuthController, :callback
   end
 
   # Other scopes may use custom stacks.

@@ -1,12 +1,12 @@
 <h1>Users Online</h1>
 <.table id="users" rows={@users_online}>
-    <:col :let={user} label="User ID"><%= user.id %></:col>
-    <:col :let={user} label="Name"><%= user.first_name %> <%= user.middle_name %> <%= user.last_name %></:col>
+  <:col :let={user} label="User ID">{user.id}</:col>
+  <:col :let={user} label="Name">{user.first_name} {user.middle_name} {user.last_name}</:col>
 </.table>
-<br/>
-<br/>
+<br />
+<br />
 <h1>All Users</h1>
 <.table id="users" rows={@users}>
-    <:col :let={user} label="User ID"><%= user.id %></:col>
-    <:col :let={user} label="Name"><%= user.first_name %> <%= user.middle_name %> <%= user.last_name %></:col>
+  <:col :let={user} label="User ID">{user.id}</:col>
+  <:col :let={user} label="Name">{user.first_name} {user.middle_name} {user.last_name}</:col>
 </.table>

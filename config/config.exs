@@ -35,6 +35,15 @@ config :portal, Prodigy.Portal.UserManager.Guardian,
   issuer: "prodigy_portal",
   secret_key: "r6ygfUoemC9s6HPcZYwm9EGAC/+Xt6NmcvAidvW7wN2Yd2k3TpuetRZTB5Juvvy0"
 
+config :ueberauth, Ueberauth,
+  providers: [
+    github: { Ueberauth.Strategy.Github, [default_scope: "user:email"] }
+  ]
+
+config :ueberauth, Ueberauth.Strategy.Github.OAuth,
+  client_id: System.get_env("GITHUB_CLIENT_ID"),
+  client_secret: System.get_env("GITHUB_CLIENT_SECRET")
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.17.11",

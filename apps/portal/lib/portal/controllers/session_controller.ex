@@ -7,10 +7,12 @@ defmodule Prodigy.Portal.SessionController do
   def new(conn, _) do
     changeset = UserManager.change_user(%PortalUser{})
     maybe_user = Guardian.Plug.current_resource(conn)
+
     if maybe_user do
       redirect(conn, to: "/protected")
     else
-      render(conn, "new.html", changeset: changeset, form: %{}) #, action: Routes.session_path(conn, :login))
+      # , action: Routes.session_path(conn, :login))
+      render(conn, "new.html", changeset: changeset)
     end
   end
 
@@ -21,16 +23,24 @@ defmodule Prodigy.Portal.SessionController do
 
   def logout(conn, _) do
     conn
-    |> Guardian.Plug.sign_out() #This module's full name is Auth.UserManager.Guardian.Plug,
-    |> redirect(to: "/login")   #and the arguments specified in the Guardian.Plug.sign_out()
-  end                           #docs are not applicable here
+    # This module's full name is Auth.UserManager.Guardian.Plug,
+    |> Guardian.Plug.sign_out()
+    # and the arguments specified in the Guardian.Plug.sign_out()
+    |> redirect(to: "/login")
+  end
+
+  # docs are not applicable here
 
   defp login_reply({:ok, user}, conn) do
     conn
     |> put_flash(:info, "Welcome back!")
-    |> Guardian.Plug.sign_in(user)   #This module's full name is Auth.UserManager.Guardian.Plug,
-    |> redirect(to: "/protected")    #and the arguments specified in the Guardian.Plug.sign_in()
-  end                                #docs are not applicable here.
+    # This module's full name is Auth.UserManager.Guardian.Plug,
+    |> Guardian.Plug.sign_in(user)
+    # and the arguments specified in the Guardian.Plug.sign_in()
+    |> redirect(to: "/protected")
+  end
+
+  # docs are not applicable here.
 
   defp login_reply({:error, reason}, conn) do
     conn
@@ -38,4 +48,3 @@ defmodule Prodigy.Portal.SessionController do
     |> new(%{})
   end
 end
-

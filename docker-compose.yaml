@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: prodigy
       POSTGRES_PASSWORD: prodigy
       POSTGRES_DB: prodigy
+    ports:
+      - "5432:5432"
   server:
     build:
       context: .
