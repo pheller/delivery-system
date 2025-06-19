@@ -60,7 +60,7 @@ Instructions below are prototypical for Linux, but may vary for your preferred o
 ```
 % mount /path/to/client.img /mnt/floppy
 % mkdir -p /tmp/prodigy/C/PRODIGY
-% cp -r /mnt/floppy /tmp/prodigy/C/PRODIGY
+% cp -R /mnt/floppy /tmp/prodigy/C/PRODIGY
 % umount /mnt/floppy
 % cat << EOF > /tmp/prodigy/dosbox.conf
  !!! config here - see below
@@ -72,7 +72,7 @@ EOF
 ```
 
 ## Dosbox Configuration 
-(default at: `./dosbox -printconf`)
+(default at: `./path/to/dosbox -printconf`)
 
 Dosbox configuration is beyond the scope of this document, but the default should work with a few tweaks:
 ```
