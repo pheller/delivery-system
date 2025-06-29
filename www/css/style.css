@@ -1,0 +1,110 @@
+@import url('//fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap');
+
+h1,
+h2,
+h3,
+nav,
+.nav-link,
+.navbar-brand {
+	font-family: 'Chakra Petch';
+	color: #ffa301;
+}
+
+button,
+a.btn {
+	font-family: 'Chakra Petch';
+}
+
+.btn {
+	box-shadow: 3px 3px 4px rgba(0, 0, 0, 0.5);
+}
+
+nav {
+	opacity: 0.9;
+}
+
+nav.sticky-top {
+	z-index: 2000;
+	/* So nav dropdowns appear above home carousel */
+}
+
+.navbar-brand img {
+	height: 35px;
+	width: auto;
+}
+
+main {
+	min-height: 70vh;
+}
+
+footer a {
+	margin-top: 0;
+	margin-bottom: 0;
+	padding-top: 0;
+	padding-bottom: 0;
+}
+
+footer p.small {
+	opacity: 0.6;
+	font-size: 0.7rem;
+}
+
+.home-logo {
+	background-color: #ffc107;
+}
+
+.home-logo * {
+	max-width: 800px;
+	width: 100%;
+}
+
+.reloaded {
+	text-align: center;
+	font-family: 'Chakra Petch';
+	font-size: clamp(12px, 6vw, 100px);
+	line-height: clamp(12px, 6vw, 100px);
+	font-weight: bold;
+	letter-spacing: 22px;
+	text-transform: uppercase;
+	background-color: rgba(0, 0, 0, 1.0);
+	color: red;
+	transform: rotate(-3deg);
+	box-shadow: 2px 2px 2px red;
+}
+
+.card {
+	background-color: #00a0f1;
+	width: 100%;
+	max-width: 30rem;
+}
+
+.four-oh-four::before {
+	color: #ffa301;
+	content: ':(';
+	font-size: 15rem;
+	line-height: 20rem;
+}
+
+dt {
+	position: relative;
+	padding-left: 1.4em;
+	/* make room for the image */
+}
+
+dt::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0.15em;
+	/* tweak vertically to align with text */
+	width: 1em;
+	height: 1em;
+	background-image: url('/images/star.png');
+	background-size: contain;
+	background-repeat: no-repeat;
+	background-position: center;
+}
+
+dd {
+	margin-left: 1.4em;
+}
