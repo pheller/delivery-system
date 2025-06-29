@@ -48,6 +48,29 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+  wsrelay:
+    image: cloudamqp/websocket-tcp-relay:latest
+    ports:
+      - "8081:8081"
+    depends_on:
+      - server
+    volumes:
+      - ./www:/var/www
+    entrypoint:
+      - /usr/bin/websocket-tcp-relay
+      - --bind=0.0.0.0
+      - --upstream=tcp://server:25234
+      - --port=8081
+      - --webroot=/var/www
+  caddy:
+    image: caddy:2.10.0-alpine
+    ports:
+      - "8080:8080"
+    depends_on:
+      - wsrelay
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./www:/var/www
 
 volumes:
   db_data:

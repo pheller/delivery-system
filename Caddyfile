@@ -1,0 +1,12 @@
+:8080, :8443 {
+	# Serve static files from /var/www
+	root * /var/www
+	file_server
+
+	# Forward websocket requests to wsrelay:8081
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets wsrelay:8081
+}
