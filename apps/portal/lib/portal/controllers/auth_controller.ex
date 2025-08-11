@@ -2,6 +2,7 @@ defmodule Prodigy.Portal.AuthController do
   use Prodigy.Portal, :controller
 
   alias Prodigy.Portal.UserManager
+  alias Prodigy.Portal.UserManager.Guardian
 
   plug Ueberauth
 
@@ -10,22 +11,17 @@ defmodule Prodigy.Portal.AuthController do
     conn
   end
 
-  def callback(%{assigns: %{ueberauth_auth: auth}} = conn, _params) do
-    email = auth.info.email
+  def callback(%{assigns: %{ueberauth_auth: %{provider: :github} = auth}} = conn, _params) do
+    %{uid: uid, info: %{email: email}} = auth
 
-    case UserManager.get_or_create(email) do
-      {:ok, user} ->
-        conn
-        |> put_flash(:info, "Successfully authenticated.")
-        |> put_session(:current_user, user)
-        |> configure_session(renew: true)
-        |> redirect(to: "/")
+    {:ok, user} =
+      UserManager.get_or_create(%{provider_uid: uid, provider: :github, username: email})
 
-      {:error, reason} ->
-        conn
-        |> put_flash(:error, reason)
-        |> redirect(to: "/")
-    end
+    conn
+    |> Guardian.Plug.sign_in(user, %{role: :user})
+    |> put_flash(:info, "Successfully authenticated.")
+    |> configure_session(renew: true)
+    |> redirect(to: "/")
   end
 
   def callback(conn, _) do

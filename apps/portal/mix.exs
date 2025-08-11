@@ -35,6 +35,7 @@ defmodule Prodigy.Portal.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:ecto_sql, "~> 3.0"},
       {:phoenix, "~> 1.7.2"},
       {:phoenix_ecto, "~> 4.4"},
       {:phoenix_html, "~> 3.3"},
@@ -52,6 +53,7 @@ defmodule Prodigy.Portal.MixProject do
       {:guardian, "~> 2.3"},
       {:pbkdf2_elixir, "~> 1.0"},
       {:swoosh, "~> 1.19"},
+      {:hackney, "~> 1.25"},
       {:core, in_umbrella: true},
       {:ueberauth_github, "~> 0.8"}
     ]

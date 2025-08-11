@@ -75,3 +75,7 @@ config :core, Prodigy.Core.Data.Repo,
   username: "prodigy",
   password: "prodigy",
   hostname: "localhost"
+
+config :portal, Prodigy.Portal.UserManager.Guardian,
+  secret_key: System.fetch_env!("GUARDIAN_SECRET")
+

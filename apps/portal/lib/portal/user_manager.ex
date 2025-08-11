@@ -10,7 +10,7 @@ defmodule Prodigy.Portal.UserManager do
     Repo.all(PortalUser)
   end
 
-  def get_user!(username), do: Repo.get!(PortalUser, username)
+  def get_user!(id), do: Repo.get!(PortalUser, id)
 
   def create_user(attrs \\ %{}) do
     %PortalUser{}
@@ -18,13 +18,11 @@ defmodule Prodigy.Portal.UserManager do
     |> Repo.insert()
   end
 
-  def get_or_create(_email) do
-    nil
-#    case Repo.get(PortalUser, email) do
-      # TODO how to handle users by email only?
-#      nil -> create_user(username: email)
-#      user -> user
-#    end
+  def get_or_create(%{} = attrs) do
+    case Repo.get_by(PortalUser, attrs) do
+      nil -> create_user(attrs)
+      user -> {:ok, user}
+    end
   end
 
   def update_user(%PortalUser{} = user, attrs) do

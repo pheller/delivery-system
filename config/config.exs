@@ -32,8 +32,7 @@ config :portal, Prodigy.Portal.Endpoint,
   server: true
 
 config :portal, Prodigy.Portal.UserManager.Guardian,
-  issuer: "prodigy_portal",
-  secret_key: "r6ygfUoemC9s6HPcZYwm9EGAC/+Xt6NmcvAidvW7wN2Yd2k3TpuetRZTB5Juvvy0"
+  issuer: "prodigy_portal"
 
 config :ueberauth, Ueberauth,
   providers: [

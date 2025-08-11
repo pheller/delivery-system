@@ -10,9 +10,13 @@ defmodule Prodigy.Portal.UserManagerTests do
     password: "some password"
   }
 
-  test "create_user/1 with valid data creates a user" do
+  # TODO provider: :password
+
+  test "create_user/1 with valid username, password creates a user" do
     assert {:ok, %PortalUser{} = user} = UserManager.create_user(@valid_attrs)
     assert {:ok, user} == Pbkdf2.check_pass(user, "some password", hash_key: :password)
     assert user.username == "some username"
   end
+
+  # github test?
 end

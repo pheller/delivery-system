@@ -18,8 +18,16 @@ defmodule Prodigy.Portal.Router do
     plug Prodigy.Portal.UserManager.Pipeline
   end
 
-  pipeline :ensure_auth do
+  pipeline :ensure_user do
     plug Guardian.Plug.EnsureAuthenticated
+    plug :current_user
+  end
+
+  defp current_user(conn, _params) do
+    case Guardian.Plug.current_resource(conn) |> IO.inspect(label: "current_user") do
+      nil -> conn
+      user -> assign(conn, :current_user, user)
+    end
   end
 
   scope "/", Prodigy.Portal do
@@ -33,7 +41,6 @@ defmodule Prodigy.Portal.Router do
     get "/login", SessionController, :new
     post "/login", SessionController, :login
     get "/logout", SessionController, :logout
-    get "/account", PageController, :account
 
     # get "/users", UsersController, :index
     live "/users", UsersLive
@@ -42,9 +49,9 @@ defmodule Prodigy.Portal.Router do
   end
 
   scope "/", Prodigy.Portal do
-    pipe_through [:browser, :auth, :ensure_auth]
+    pipe_through [:browser, :auth, :ensure_user]
 
-    get "/protected", PageController, :protected
+    get "/account", AccountController, :show
   end
 
   scope "/auth", Prodigy.Portal do
