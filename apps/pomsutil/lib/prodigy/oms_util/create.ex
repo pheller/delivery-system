@@ -56,7 +56,6 @@ defmodule Create do
         end
         IO.puts("   * Concurrency limit: #{limit_msg}")
 
-
       _existing ->
         IO.puts("Error: Household #{household_id} already exists")
         exit({:shutdown, 1})
