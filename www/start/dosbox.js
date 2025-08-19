@@ -106,7 +106,7 @@ var wasmMemory;
 var ABORT = false;
 var EXITSTATUS;
 
-Module["websocket"] = { url: 'ws://10.0.1.193:8080' };
+Module["websocket"] = { url: `ws://${window.location.host}` };
 
 function assert(condition, text) {
     if (!condition) {
