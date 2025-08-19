@@ -3158,7 +3158,7 @@ var SOCKFS = {
             } else {
                 try {
                     var url = "ws:#".replace("#", "//");
-                    var subProtocols = "binary";
+                    var subProtocols = "null";
                     var opts = undefined;
                     if (SOCKFS.websocketArgs["url"]) {
                         url = SOCKFS.websocketArgs["url"]
