@@ -267,6 +267,8 @@ defmodule Prodigy.Server.Service.Logon do
       Logger.warn("User is connecting with an unacceptable software version")
       :bad_version
     end
+
+    true
   end
 
   def handle(
