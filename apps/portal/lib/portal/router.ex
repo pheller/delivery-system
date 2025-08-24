@@ -24,7 +24,7 @@ defmodule Prodigy.Portal.Router do
   end
 
   defp current_user(conn, _params) do
-    case Guardian.Plug.current_resource(conn) |> IO.inspect(label: "current_user") do
+    case Guardian.Plug.current_resource(conn) do
       nil -> conn
       user -> assign(conn, :current_user, user)
     end
