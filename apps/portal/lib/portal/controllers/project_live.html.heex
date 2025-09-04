@@ -1,116 +1,126 @@
 <!-- Content Columns -->
 <div class="md:flex mt-8 space-x-4 px-8">
-    <div class="md:w-1/3"/>
-    <div class="md:w-4/5 w-full">
-        <p class="text-gray-700 font-bold text-2xl">About the Project</p>
-        &nbsp;
-        <p class="text-gray-700 font-bold text-2xl">Genesis</p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Prodigy made use of a hierarchical caching system whereby content would first be sought from a cache
-            within the end-users computer, then the regional servers, and ultimately the origin server.
-            These cache retrievals would “warm” the lower layers with popular content, and subject to policies,
-            content may persist on the end-user computer within a file named <span class="font-mono">STAGE.DAT</span>
-            for use in subsequent sessions.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            In 2014, Jim Carpenter, a Software developer and Prodigy enthusiast, discovered that the
-            <span class="font-mono">STAGE.DAT</span> file contained a FAT-like filesystem. Carpenter developed
-            software to extract the objects and coerce the client into displaying the images contained within.
-            Journalist Benj Edwards writes about Jim’s efforts in his article <a href="#">Where Online Services Go When
+  <div class="md:w-1/3" />
+  <div class="md:w-4/5 w-full">
+    <p class="text-gray-700 font-bold text-2xl">About the Project</p>
+    &nbsp;
+    <p class="text-gray-700 font-bold text-2xl">Genesis</p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Prodigy made use of a hierarchical caching system whereby content would first be sought from a cache
+      within the end-users computer, then the regional servers, and ultimately the origin server.
+      These cache retrievals would “warm” the lower layers with popular content, and subject to policies,
+      content may persist on the end-user computer within a file named
+      <span class="font-mono">STAGE.DAT</span>
+      for use in subsequent sessions.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      In 2014, Jim Carpenter, a Software developer and Prodigy enthusiast, discovered that the
+      <span class="font-mono">STAGE.DAT</span>
+      file contained a FAT-like filesystem. Carpenter developed
+      software to extract the objects and coerce the client into displaying the images contained within.
+      Journalist Benj Edwards writes about Jim’s efforts in his article <a href="#">Where Online Services Go When
             They Die</a>, and Benj published the imagery that Jim was able to extract from several contributed
-            <span class="font-mono">STAGE.DAT</span> files here.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            In late 2019, Phil Heller read the article, and given the success in <a href="#">reviving Quantum Link</a>
-            some years ago, developed an interest in doing the same for Prodigy.
-        </p>
-        <p class="text-gray-700 font-bold text-2xl">Cautious Optimism</p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Phil Heller retrieved the Prodigy Patent and the associated Patent application, which included several
-            thousand pages of the source code for the Reception System. Between the source code and the patent,
-            Phil implemented enough code to convince the client to try to connect as detailed in this
-            <a href="#">blog post</a>, but for a while, this was a sticking point, and the project was put on hold.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Some months later the project resumed and some further progress was made by simply fuzzing the client with
-            responses of various sizes, ultimately narrowing on a number of login responses that allowed the client to
-            continue. A greater breakthrough was made when Phil was furnished a number of documents, including the
-            Prodigy “Application Developers Reference Manual” (ADRM). While not a document with deep technical
-            specifications, it included an instructive example of a TBOL debugging session complete with source,
-            and a disassembly of the corresponding binary. It was this that convinced Phil to redouble efforts to
-            extract virtual machine’s instruction set from the patent source and build a disassembler.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            A second <a href="#">blog post</a> was published, detailing the construction of such a disassembler,
-            and the use of it to further determine the client request and response format for various services.
-        </p>
-        &nbsp;
-        <p class="text-gray-700 font-bold text-2xl">Rapid Progress</p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            With a disassembler constructed, Phil continued to build a mock server operating with a similar
-            configuration grammar that Prodigy’s own mock server utilized, as described in the ADRM. More TBOL
-            binaries were disassembled, more functionality understood, and yet more questions raised.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Given that it seemed likely some part of the service could be revived, it was decided to exhibit the
-            project at whatever state it might be in at the Vintage Computer Festival West in August 2022. As a
-            result, the mock server was entirely rewritten with a real database backend, and then began work to
-            replicate content.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            The project is very fortunate that an Archive.org contributor rescued and shared the contents of some
-            old floppies in early 2022. Specifically, these files include CREDO (Create and Edit Objects) and
-            GCU (Graphics Creation Utility).
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            CREDO allows greater inspection of Object files extracted from <span class="font-mono">STAGE.DAT</span>,
-            and construction of new “objects” for upload to the server and distribution to clients.
-            GCU provides a NAPLPS editing environment. These two tools together have made it possible to create
-            new and recreate original Prodigy content.
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            The project was named Prodigy Reloaded as the author’s nod to the prior work of the Quantum Link
-            enthusiasts. As of this writing, the following works within Prodigy Reloaded:
-            <ul class="list-disc px-4 text-gray-700 font-medium text-lg">
-                <li>Logon</li>
-                <li>Enrollment - Household and User</li>
-                <li>Logoff - Normal and Abnormal</li>
-                <li>Sending and receiving email</li>
-                <li>Retrieving Stock quotes</li>
-                <li>Jumpwords and Jumpword Index</li>
-                <li>Viewpath (partial)</li>
-                <li>Guide Menus</li>
-                <li>Highlights Page</li>
-                <li>Profile retrieval and update</li>
-                <li>The very beginning of MadMaze</li>
-                <li>A single static Weather Map</li>
-            </ul>
-        </p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Known issues:
-            <ul class="list-disc px-4 text-gray-700 font-medium text-lg">
-                <li>Email can be neither deleted nor retained</li>
-                <li>Some of navigational elements of personal address book and mailing list work,
-                    but none of the logic works.</li>
-                <li>The user-list does not work for lack of the CCDAM driver object.</li>
-                <li>“Directory” and “Find” do not work, for lack of the CCDAM driver object.</li>
-                <li>Quote Track does not work, but there still may be hope that the objects necessary to make this
-                    work are available.</li>
-                <li>Stock Quotes will fulfill any valid equities quote (via YahooFiannce), but all symbols will
-                    resolve to the name “International Business Machines”.</li>
-                <li>None of the TCS (Trintex Communications Subsystem) error recovery mechanisms are implemented as
-                    of yet, as the intial approach was for the client to connect over reliable TCP sessions.
-                    As such, modem-based connections are susceptible to line noise which often causes the client to
-                    timeout or disconnect.</li>
-            </ul>
-        </p>
-        &nbsp;
-        <p class="text-gray-700 font-bold text-2xl">Plans</p>
-        <p class="text-gray-700 font-medium text-lg py-4">
-            Subsequent to the VCF West show, the author intends to improve the test coverage in the server code,
-            improve documentation, open access to a public server, and publish the repositories for all the tools and
-            the Prodigy server.
-        </p>
-    </div>
-    <div class="md:w-1/3"/>
+      <span class="font-mono">STAGE.DAT</span>
+      files here.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      In late 2019, Phil Heller read the article, and given the success in
+      <a href="#">reviving Quantum Link</a>
+      some years ago, developed an interest in doing the same for Prodigy.
+    </p>
+    <p class="text-gray-700 font-bold text-2xl">Cautious Optimism</p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Phil Heller retrieved the Prodigy Patent and the associated Patent application, which included several
+      thousand pages of the source code for the Reception System. Between the source code and the patent,
+      Phil implemented enough code to convince the client to try to connect as detailed in this <a href="#">blog post</a>, but for a while, this was a sticking point, and the project was put on hold.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Some months later the project resumed and some further progress was made by simply fuzzing the client with
+      responses of various sizes, ultimately narrowing on a number of login responses that allowed the client to
+      continue. A greater breakthrough was made when Phil was furnished a number of documents, including the
+      Prodigy “Application Developers Reference Manual” (ADRM). While not a document with deep technical
+      specifications, it included an instructive example of a TBOL debugging session complete with source,
+      and a disassembly of the corresponding binary. It was this that convinced Phil to redouble efforts to
+      extract virtual machine’s instruction set from the patent source and build a disassembler.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      A second <a href="#">blog post</a>
+      was published, detailing the construction of such a disassembler,
+      and the use of it to further determine the client request and response format for various services.
+    </p>
+    &nbsp;
+    <p class="text-gray-700 font-bold text-2xl">Rapid Progress</p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      With a disassembler constructed, Phil continued to build a mock server operating with a similar
+      configuration grammar that Prodigy’s own mock server utilized, as described in the ADRM. More TBOL
+      binaries were disassembled, more functionality understood, and yet more questions raised.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Given that it seemed likely some part of the service could be revived, it was decided to exhibit the
+      project at whatever state it might be in at the Vintage Computer Festival West in August 2022. As a
+      result, the mock server was entirely rewritten with a real database backend, and then began work to
+      replicate content.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      The project is very fortunate that an Archive.org contributor rescued and shared the contents of some
+      old floppies in early 2022. Specifically, these files include CREDO (Create and Edit Objects) and
+      GCU (Graphics Creation Utility).
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      CREDO allows greater inspection of Object files extracted from <span class="font-mono">STAGE.DAT</span>,
+      and construction of new “objects” for upload to the server and distribution to clients.
+      GCU provides a NAPLPS editing environment. These two tools together have made it possible to create
+      new and recreate original Prodigy content.
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      The project was named Prodigy Reloaded as the author’s nod to the prior work of the Quantum Link
+      enthusiasts. As of this writing, the following works within Prodigy Reloaded:
+      <ul class="list-disc px-4 text-gray-700 font-medium text-lg">
+        <li>Logon</li>
+        <li>Enrollment - Household and User</li>
+        <li>Logoff - Normal and Abnormal</li>
+        <li>Sending and receiving email</li>
+        <li>Retrieving Stock quotes</li>
+        <li>Jumpwords and Jumpword Index</li>
+        <li>Viewpath (partial)</li>
+        <li>Guide Menus</li>
+        <li>Highlights Page</li>
+        <li>Profile retrieval and update</li>
+        <li>The very beginning of MadMaze</li>
+        <li>A single static Weather Map</li>
+      </ul>
+    </p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Known issues:
+      <ul class="list-disc px-4 text-gray-700 font-medium text-lg">
+        <li>Email can be neither deleted nor retained</li>
+        <li>Some of navigational elements of personal address book and mailing list work,
+          but none of the logic works.</li>
+        <li>The user-list does not work for lack of the CCDAM driver object.</li>
+        <li>“Directory” and “Find” do not work, for lack of the CCDAM driver object.</li>
+        <li>
+          Quote Track does not work, but there still may be hope that the objects necessary to make this
+          work are available.
+        </li>
+        <li>
+          Stock Quotes will fulfill any valid equities quote (via YahooFiannce), but all symbols will
+          resolve to the name “International Business Machines”.
+        </li>
+        <li>
+          None of the TCS (Trintex Communications Subsystem) error recovery mechanisms are implemented as
+          of yet, as the intial approach was for the client to connect over reliable TCP sessions.
+          As such, modem-based connections are susceptible to line noise which often causes the client to
+          timeout or disconnect.
+        </li>
+      </ul>
+    </p>
+    &nbsp;
+    <p class="text-gray-700 font-bold text-2xl">Plans</p>
+    <p class="text-gray-700 font-medium text-lg py-4">
+      Subsequent to the VCF West show, the author intends to improve the test coverage in the server code,
+      improve documentation, open access to a public server, and publish the repositories for all the tools and
+      the Prodigy server.
+    </p>
+  </div>
+  <div class="md:w-1/3" />
 </div>

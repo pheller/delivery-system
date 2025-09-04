@@ -1,11 +1,6 @@
 defmodule Prodigy.Portal.PageController do
   use Prodigy.Portal, :controller
 
-  def protected(conn, _) do
-    user = Guardian.Plug.current_resource(conn)
-    render(conn, "protected.html", current_user: user)
-  end
-
   def home(conn, _params) do
     # The home page is often custom made,
     # so skip the default app layout.
@@ -26,9 +21,5 @@ defmodule Prodigy.Portal.PageController do
 
   def login(conn, _params) do
     render(conn, :login, layout: false)
-  end
-
-  def account(conn, _params) do
-    render(conn, :account, layout: false)
   end
 end

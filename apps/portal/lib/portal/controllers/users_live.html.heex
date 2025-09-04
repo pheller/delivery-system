@@ -1,11 +1,11 @@
 <!-- Content Columns -->
 <div class="md:flex mt-8 space-x-4 px-8">
-    <div class="md:w-1/3"/>
-    <div class="md:w-4/5 w-full">
-          <.table id="users" rows={@users_online}>
-            <:col :let={user} label="id"><%= user.id %></:col>
-            <:col :let={user} label="name"><%= user.first_name %> <%= user.middle_name %> <%= user.last_name %></:col>
-          </.table>
-    </div>
-    <div class="md:w-1/3"/>
+  <div class="md:w-1/3" />
+  <div class="md:w-4/5 w-full">
+    <.table id="users" rows={@users_online}>
+      <:col :let={user} label="id">{user.id}</:col>
+      <:col :let={user} label="name">{user.first_name} {user.middle_name} {user.last_name}</:col>
+    </.table>
+  </div>
+  <div class="md:w-1/3" />
 </div>

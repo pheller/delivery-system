@@ -9,6 +9,7 @@ defmodule DeliverySystem.MixProject do
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       dialyzer: [
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
       ],
@@ -58,7 +59,14 @@ defmodule DeliverySystem.MixProject do
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:excoveralls, "~> 0.10", only: :test},
-      {:ex_doc, "~> 0.21", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.21", only: :dev, runtime: false},
+      {:guardian, "~> 2.0"}
+    ]
+  end
+
+  defp aliases do
+    [
+      "ecto.setup": ["ecto.create", "ecto.migrate"],
     ]
   end
 end
