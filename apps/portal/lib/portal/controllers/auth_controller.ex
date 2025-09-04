@@ -19,6 +19,7 @@ defmodule Prodigy.Portal.AuthController do
 
     conn
     |> Guardian.Plug.sign_in(user, %{role: :user})
+    |> put_session(:user_id, user.id)
     |> put_flash(:info, "Successfully authenticated.")
     |> configure_session(renew: true)
     |> redirect(to: "/")

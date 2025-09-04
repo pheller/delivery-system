@@ -54,6 +54,8 @@ defmodule Prodigy.Portal do
       use Phoenix.LiveView,
         layout: {Prodigy.Portal.Layouts, :app}
 
+      on_mount {Portal.Live.AuthHook, :assign_current_user}
+
       unquote(html_helpers())
     end
   end

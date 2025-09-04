@@ -20,15 +20,8 @@ defmodule Prodigy.Portal.Router do
 
   pipeline :ensure_user do
     plug Guardian.Plug.EnsureAuthenticated
-    plug :current_user
   end
 
-  defp current_user(conn, _params) do
-    case Guardian.Plug.current_resource(conn) do
-      nil -> conn
-      user -> assign(conn, :current_user, user)
-    end
-  end
 
   scope "/", Prodigy.Portal do
     pipe_through [:browser, :auth]

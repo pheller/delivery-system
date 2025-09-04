@@ -10,4 +10,11 @@ defmodule Prodigy.Portal.UserManager.Pipeline do
   plug Guardian.Plug.VerifyHeader, claims: %{"typ" => "access"}
   # Load the user if either of the verifications worked
   plug Guardian.Plug.LoadResource, allow_blank: true
+  # assign current_user if authenticated
+  plug :current_user
+
+  defp current_user(conn, _opts) do
+    assign(conn, :current_user, Guardian.Plug.current_resource(conn))
+  end
+
 end

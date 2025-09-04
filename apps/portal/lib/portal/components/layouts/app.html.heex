@@ -18,7 +18,13 @@
     <.link class="text-gray-500 font-medium text-xl px-6" patch={~p"/get-started"}>
       Get Started
     </.link>
-    <a href="/login" class="text-gray-500 font-medium text-xl px-6">Login</a>
+        <%= if @current_user do %>
+          <a href="/account" class="text-gray-500 font-medium text-xl px-6">Account</a>
+        <% else %>
+          <a href="/login" class="text-gray-500 font-medium text-xl px-6">Login</a>
+        <% end %>
+
+
   </div>
   <button class="lg:hidden text-gray-500">
     <svg
