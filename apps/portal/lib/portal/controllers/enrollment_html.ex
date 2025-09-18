@@ -9,8 +9,14 @@ defmodule Prodigy.Portal.EnrollmentHTML do
         service providers. Pick one, then click it's icon to get started.
       </div>
 
-      <div>
-        <.button_link href="/auth/github">Github</.button_link>
+      <div class="flex flex-row gap-4">
+        <div>
+          <.button_link href="/auth/github">Github</.button_link>
+        </div>
+
+        <div>
+          <.button_link href="/login">Username & password</.button_link>
+        </div>
       </div>
     </div>
     """

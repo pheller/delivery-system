@@ -1,9 +1,0 @@
-<h2>Login Page</h2>
-
-<.simple_form :let={f} for={to_form(@changeset)} phx-change="validate" phx-submit="save">
-  <.input field={f[:username]} label="Email" />
-  <.input field={f[:password]} label="Password" />
-  <:actions>
-    <.button>Save</.button>
-  </:actions>
-</.simple_form>

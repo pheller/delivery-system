@@ -12,6 +12,8 @@ defmodule Prodigy.Portal.UserManager do
 
   def get_user!(id), do: Repo.get!(PortalUser, id)
 
+  def get_user_by(params) when is_map(params), do: Repo.get_by(PortalUser, Map.to_list(params))
+
   def create_user(attrs \\ %{}) do
     %PortalUser{}
     |> PortalUser.changeset(attrs)
@@ -48,7 +50,7 @@ defmodule Prodigy.Portal.UserManager do
         {:error, :invalid_credentials}
 
       user ->
-        if Pbkdf2.verify_pass(plain_text_password, user.password) do
+        if Pbkdf2.verify_pass(plain_text_password, user.password_hashed) do
           {:ok, user}
         else
           {:error, :invalid_credentials}

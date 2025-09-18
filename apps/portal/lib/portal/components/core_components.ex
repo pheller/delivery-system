@@ -15,8 +15,6 @@ defmodule Prodigy.Portal.CoreComponents do
   Icons are provided by [heroicons](https://heroicons.com). See `icon/1` for usage.
   """
 
-  #  import Prodigy.Portal.Gettext
-
   use Phoenix.Component
   use Gettext, otp_app: :portal, backend: Prodigy.Portal.Gettext
 
@@ -251,6 +249,7 @@ defmodule Prodigy.Portal.CoreComponents do
   ## Example
       <.button_link href="/home">Home<./button_link>
   """
+  attr :href, :string, required: true
   attr :type, :string, default: nil
   attr :class, :string, default: nil
   attr :rest, :global, include: ~w(disabled form name value)
@@ -260,6 +259,7 @@ defmodule Prodigy.Portal.CoreComponents do
   def button_link(assigns) do
     ~H"""
     <.link
+      href={@href}
       type={@type}
       class={[
         "phx-submit-loading:opacity-75 rounded-lg bg-zinc-900 hover:bg-zinc-700 py-2 px-3",

@@ -1,19 +1,25 @@
 defmodule Prodigy.Portal.SessionController do
   use Prodigy.Portal, :controller
 
+  import Phoenix.Component
+
   alias Prodigy.Core.Data.Portal.User, as: PortalUser
   alias Prodigy.Portal.UserManager
   alias Prodigy.Portal.UserManager.Guardian
   alias Prodigy.Portal.UserManager.Guardian.Plug
 
   def new(conn, _) do
-    changeset = UserManager.change_user(%PortalUser{})
+    form =
+      %PortalUser{}
+      |> UserManager.change_user()
+      |> to_form()
+
     maybe_user = Guardian.Plug.current_resource(conn)
 
     if maybe_user do
-      redirect(conn, to: "/protected")
+      redirect(conn, to: ~p"/account")
     else
-      render(conn, "new.html", changeset: changeset)
+      render(conn, :new, form: form)
     end
   end
 
@@ -26,7 +32,7 @@ defmodule Prodigy.Portal.SessionController do
     conn
     |> Plug.sign_out()
     |> put_session(:user_id, nil)
-    |> redirect(to: "/login")
+    |> redirect(to: ~p"/login")
   end
 
   defp login_reply({:ok, user}, conn) do
@@ -34,7 +40,7 @@ defmodule Prodigy.Portal.SessionController do
     |> put_flash(:info, "Welcome back!")
     |> Plug.sign_in(user)
     |> put_session(:user_id, user.id)
-    |> redirect(to: "/protected")
+    |> redirect(to: ~p"/")
   end
 
   defp login_reply({:error, reason}, conn) do

@@ -16,5 +16,4 @@ defmodule Prodigy.Portal.UserManager.Pipeline do
   defp current_user(conn, _opts) do
     assign(conn, :current_user, Guardian.Plug.current_resource(conn))
   end
-
 end

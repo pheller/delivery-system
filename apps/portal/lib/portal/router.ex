@@ -22,7 +22,6 @@ defmodule Prodigy.Portal.Router do
     plug Guardian.Plug.EnsureAuthenticated
   end
 
-
   scope "/", Prodigy.Portal do
     pipe_through [:browser, :auth]
 
@@ -31,14 +30,17 @@ defmodule Prodigy.Portal.Router do
     get "/news", PageController, :news
     live "/get-started", GetStartedLive
 
+    get "/register", RegistrationController, :new
+    post "/register", RegistrationController, :create
+
     get "/login", SessionController, :new
     post "/login", SessionController, :login
     get "/logout", SessionController, :logout
 
-    # get "/users", UsersController, :index
-    live "/users", UsersLive
-
     get "/enrollment", EnrollmentController, :new
+    post "/enrollment", EnrollmentController, :create
+
+    live "/users", UsersLive
   end
 
   scope "/", Prodigy.Portal do
