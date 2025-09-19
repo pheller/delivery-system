@@ -20,5 +20,5 @@ defmodule Prodigy.Portal.Gettext do
 
   See the [Gettext Docs](https://hexdocs.pm/gettext) for detailed usage.
   """
-  use Gettext, otp_app: :portal
+  use Gettext.Backend, otp_app: :portal
 end

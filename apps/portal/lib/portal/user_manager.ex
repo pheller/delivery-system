@@ -1,5 +1,4 @@
 defmodule Prodigy.Portal.UserManager do
-
   alias Prodigy.Core.Data.Repo
   alias Prodigy.Core.Data.Portal.User, as: PortalUser
 
@@ -11,12 +10,21 @@ defmodule Prodigy.Portal.UserManager do
     Repo.all(PortalUser)
   end
 
-  def get_user!(username), do: Repo.get!(PortalUser, username)
+  def get_user!(id), do: Repo.get!(PortalUser, id)
+
+  def get_user_by(params) when is_map(params), do: Repo.get_by(PortalUser, Map.to_list(params))
 
   def create_user(attrs \\ %{}) do
     %PortalUser{}
     |> PortalUser.changeset(attrs)
     |> Repo.insert()
+  end
+
+  def get_or_create(%{} = attrs) do
+    case Repo.get_by(PortalUser, attrs) do
+      nil -> create_user(attrs)
+      user -> {:ok, user}
+    end
   end
 
   def update_user(%PortalUser{} = user, attrs) do
@@ -34,13 +42,15 @@ defmodule Prodigy.Portal.UserManager do
   end
 
   def authenticate_user(username, plain_text_password) do
-    query = from u in PortalUser, where: u.username == ^username
+    query = from(u in PortalUser, where: u.username == ^username)
+
     case Repo.one(query) do
       nil ->
         Pbkdf2.no_user_verify()
         {:error, :invalid_credentials}
+
       user ->
-        if Pbkdf2.verify_pass(plain_text_password, user.password) do
+        if Pbkdf2.verify_pass(plain_text_password, user.password_hashed) do
           {:ok, user}
         else
           {:error, :invalid_credentials}

@@ -71,7 +71,11 @@ config :portal, Prodigy.Portal.Endpoint,
 config :portal, dev_routes: true
 
 config :core, Prodigy.Core.Data.Repo,
-  database: "prodigydev",
-  username: "prodigydev",
-  password: "prodigydev",
+  database: "prodigy",
+  username: "prodigy",
+  password: "prodigy",
   hostname: "localhost"
+
+config :portal, Prodigy.Portal.UserManager.Guardian,
+  secret_key: System.fetch_env!("GUARDIAN_SECRET")
+
