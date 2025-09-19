@@ -32,37 +32,99 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
   # Add this function near the top of the module:
   defp get_all_replies(post_id, threshold_datetime) do
-    # Use a recursive CTE to get all replies in one efficient query
-    query = """
-      WITH RECURSIVE reply_tree AS (
-        -- Base case: direct replies to the given post
-        SELECT id, sent_date, in_reply_to, 1 as level
-        FROM post
-        WHERE in_reply_to = $1
+    # Initial query: direct replies to the given post
+    initial_query =
+      Post
+      |> where([p], p.in_reply_to == ^post_id)
+      |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
 
-        UNION ALL
+    # Recursive query: replies to replies
+    recursion_query =
+      Post
+      |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
+      |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
 
-        -- Recursive case: replies to replies
-        SELECT p.id, p.sent_date, p.in_reply_to, rt.level + 1
-        FROM post p
-        INNER JOIN reply_tree rt ON p.in_reply_to = rt.id
-      )
-      SELECT id
-      FROM reply_tree
-      WHERE sent_date >= $2
-      ORDER BY sent_date ASC
-    """
+    # Combine them
+    reply_tree_query =
+      initial_query
+      |> union_all(^recursion_query)
 
-    case Repo.query(query, [post_id, threshold_datetime]) do
-      {:ok, %{rows: rows}} ->
-        Enum.map(rows, fn [id] -> id end)
-      {:error, error} ->
-        Logger.error("Failed to get replies: #{inspect(error)}")
-        []
+    # Execute the recursive CTE
+    Post
+    |> recursive_ctes(true)
+    |> with_cte("reply_tree", as: ^reply_tree_query)
+    |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
+    |> where([p, rt], rt.sent_date >= ^threshold_datetime)
+    |> order_by([p, rt], asc: rt.sent_date)
+    |> select([p, rt], rt.id)
+    |> Repo.all()
+  end
+
+  defp get_all_replies_with_dates(post_id) do
+    initial_query =
+      Post
+      |> where([p], p.in_reply_to == ^post_id)
+      |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
+
+    recursion_query =
+      Post
+      |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
+      |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
+
+    reply_tree_query =
+      initial_query
+      |> union_all(^recursion_query)
+
+    Post
+    |> recursive_ctes(true)
+    |> with_cte("reply_tree", as: ^reply_tree_query)
+    |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
+    |> order_by([p, rt], asc: rt.sent_date)
+    |> select([p, rt], %{id: rt.id, sent_date: rt.sent_date})
+    |> Repo.all()
+  end
+
+  defp get_all_replies_with_max_date(post_id) do
+    # Initial query: direct replies to the given post
+    initial_query =
+      Post
+      |> where([p], p.in_reply_to == ^post_id)
+      |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
+
+    # Recursive query: replies to replies
+    recursion_query =
+      Post
+      |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
+      |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
+
+    # Combine them
+    reply_tree_query =
+      initial_query
+      |> union_all(^recursion_query)
+
+    # Execute the recursive CTE and get both IDs and max date
+    result = Post
+             |> recursive_ctes(true)
+             |> with_cte("reply_tree", as: ^reply_tree_query)
+             |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
+             |> select([p, rt], %{id: rt.id, sent_date: rt.sent_date})
+             |> Repo.all()
+
+    case result do
+      [] ->
+        {[], nil}
+      replies ->
+        ids = Enum.map(replies, & &1.id)
+        max_date = replies
+                   |> Enum.map(& &1.sent_date)
+                   |> Enum.max()  # Just use Enum.max without DateTime
+        {ids, max_date}
     end
   end
 
-  def get_post_by_id(id, reply_number \\ 0) do
+  def get_post_by_id(id, result_number \\ nil) do
+    {_reply_ids, newest_reply_date} = get_all_replies_with_max_date(id)
+
     post = Repo.one(
       from p in Post,
       where: p.id == ^id,
@@ -87,8 +149,13 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       "    "
     end
 
-    to_name = if is_nil(post.to_name) or post.to_name == "", do: "ALL", else: post.to_name
+    newest_mmddHHMM = if newest_reply_date do
+      Calendar.strftime(newest_reply_date, "%m%d%H%M")
+    else
+      "        "
+    end
 
+    to_name = if is_nil(post.to_name) or post.to_name == "", do: "ALL", else: post.to_name
 
     {first, rest} = case post.body do
       <<first::binary-size(280), rest::binary>> -> {first, rest}
@@ -99,12 +166,10 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       0x0,                              # 0x02 goes to safepage
       0x0,                              # skips some reply related stuff? dunno
       post.from_id::binary,             # fixed 7 bytes
-      sent_mmdd::binary,
-      last_mmdd::binary,
-      sent_mmdd::binary-size(4), sent_hhmm_24hr::binary-size(4),  #   (post timestamp?)
-#      (post.in_reply_to || 0)::16-big,  # TODO - nope!  This looks like it needs to be the integer sequence of reply to the post.  e.g., first reply is 1, second is 2.
-#      1,
-      reply_number::16-big,
+      sent_mmdd::binary,                # sent date
+      sent_hhmm_24hr::binary-size(4),   # sent time
+      newest_mmddHHMM::binary-size(8),
+      (result_number || 0)::16-big,
       (post.reply_count || 0)::16-big,
       0,                                # dunno
       0::16-big,                        # dunno
@@ -365,29 +430,33 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
           current_year = Date.utc_today().year
           {:ok, threshold_datetime} = NaiveDateTime.new(current_year, month, day, hour, minute, 0)
-          threshold_datetime = DateTime.from_naive!(threshold_datetime, "Etc/UTC")
 
-          # Get all replies to the current post (recursively)
-          reply_ids = get_all_replies(context.bb.current_post_id, threshold_datetime)
+          # Get all replies with their dates
+          replies_with_dates = get_all_replies_with_dates(context.bb.current_post_id)
 
-          Logger.info(inspect(reply_ids, limit: :infinity))
+          reply_ids = Enum.map(replies_with_dates, & &1.id)
 
-          if length(reply_ids) > 0 do
-            # Get the first reply
-            first_reply_id = hd(reply_ids)
-            {response, rest} = get_post_by_id(first_reply_id, 1)
+          starting_offset = replies_with_dates
+          |> Enum.find_index(fn %{sent_date: date} -> NaiveDateTime.compare(date, threshold_datetime) >= 0 end) || 0
 
-            # Update context with reply list
+          available_replies = length(reply_ids) - starting_offset
+
+          if available_replies > 0 do
+            # Get the first reply at the starting offset
+            first_reply_id = Enum.at(reply_ids, starting_offset)
+            {response, rest} = get_post_by_id(first_reply_id, starting_offset + 1)
+
+            # Update context with reply list and starting offset
             new_context = %{context | bb: %{context.bb |
               reply_ids: reply_ids,
-              reply_offset: 0,
+              reply_offset: starting_offset,  # Start at the first reply >= threshold
               rest: rest
             }}
 
             {new_context, {:ok, response}}
           else
-            # No replies found - return appropriate response
-            {context, {:ok, <<0x0, 0x0, 0::16-big>>}}  # Adjust based on protocol
+            # No replies found after threshold
+            {context, {:ok, <<0x0, 0x0, 0::16-big>>}}
           end
 
         # User requested the rest of the reply body
