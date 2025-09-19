@@ -34,11 +34,11 @@ defmodule Prodigy.Portal.RegistrationController do
 
     else
       error ->
-        Logger.info("user create failed")
+        Logger.error("user create failed: #{inspect(error)}")
 
-        # TODO don't show this to user
+        # todo something more graceful
         conn
-        |> put_flash(:error, error)
+        |> put_flash(:error, "User create failed")
         |> render(:new)
     end
   end
