@@ -29,7 +29,40 @@ defmodule Prodigy.Server.Service.BulletinBoards do
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Context
 
-  def get_post_by_id(id) do
+
+  # Add this function near the top of the module:
+  defp get_all_replies(post_id, threshold_datetime) do
+    # Use a recursive CTE to get all replies in one efficient query
+    query = """
+      WITH RECURSIVE reply_tree AS (
+        -- Base case: direct replies to the given post
+        SELECT id, sent_date, in_reply_to, 1 as level
+        FROM post
+        WHERE in_reply_to = $1
+
+        UNION ALL
+
+        -- Recursive case: replies to replies
+        SELECT p.id, p.sent_date, p.in_reply_to, rt.level + 1
+        FROM post p
+        INNER JOIN reply_tree rt ON p.in_reply_to = rt.id
+      )
+      SELECT id
+      FROM reply_tree
+      WHERE sent_date >= $2
+      ORDER BY sent_date ASC
+    """
+
+    case Repo.query(query, [post_id, threshold_datetime]) do
+      {:ok, %{rows: rows}} ->
+        Enum.map(rows, fn [id] -> id end)
+      {:error, error} ->
+        Logger.error("Failed to get replies: #{inspect(error)}")
+        []
+    end
+  end
+
+  def get_post_by_id(id, reply_number \\ 0) do
     post = Repo.one(
       from p in Post,
       where: p.id == ^id,
@@ -69,8 +102,9 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       sent_mmdd::binary,
       last_mmdd::binary,
       sent_mmdd::binary-size(4), sent_hhmm_24hr::binary-size(4),  #   (post timestamp?)
-      (post.in_reply_to || 0)::16-big,  # TODO - nope!  This looks like it needs to be the integer sequence of reply to the post.  e.g., first reply is 1, second is 2.
+#      (post.in_reply_to || 0)::16-big,  # TODO - nope!  This looks like it needs to be the integer sequence of reply to the post.  e.g., first reply is 1, second is 2.
 #      1,
+      reply_number::16-big,
       (post.reply_count || 0)::16-big,
       0,                                # dunno
       0::16-big,                        # dunno
@@ -223,6 +257,7 @@ defmodule Prodigy.Server.Service.BulletinBoards do
         # select all posts in the bulletin board / topic that were posted since then, or any posts with replies posted since then
         # ... then, we put that list of post_ids into the context for the user to paginate over
         # ... then, we return the first page of post details
+        # Replace the existing query in the 0x67, 0x24 case with this:
         <<0, 0, 0x67, 0x24, mon::bytes-size(2), day::bytes-size(2), min::bytes-size(2), hour::bytes-size(2), topic_id::16-big >> ->
           Logger.info("start cursor for bbs topic #{topic_id}")
 
@@ -237,14 +272,16 @@ defmodule Prodigy.Server.Service.BulletinBoards do
           {:ok, threshold_datetime} = NaiveDateTime.new(current_year, month, day, hour, minute, 0)
           threshold_datetime = DateTime.from_naive!(threshold_datetime, "Etc/UTC")
 
-          # Get all matching post IDs (only top-level posts)
-          post_ids = Post
-            |> where([p], p.topic_id == ^topic_id)
-            |> where([p], is_nil(p.in_reply_to))
-            |> where([p], p.sent_date >= ^threshold_datetime)
-            |> order_by([p], asc: p.sent_date)
-            |> select([p], p.id)
-            |> Repo.all()
+          # Get all matching post IDs - posts created after threshold OR posts with replies after threshold
+          post_ids = Repo.all(
+            from p in Post,
+            left_join: r in Post, on: r.in_reply_to == p.id,
+            where: p.topic_id == ^topic_id and is_nil(p.in_reply_to),
+            where: p.sent_date >= ^threshold_datetime or r.sent_date >= ^threshold_datetime,
+            group_by: p.id,
+            order_by: [asc: p.sent_date],
+            select: p.id
+          )
 
           # Store cursor in context
           context = Map.merge(context, %{
@@ -252,6 +289,9 @@ defmodule Prodigy.Server.Service.BulletinBoards do
               post_ids: post_ids,
               offset: 0,
               topic_id: topic_id,
+              current_post_id: nil,  # Track which post we're viewing
+              reply_ids: [],         # List of reply IDs for current post
+              reply_offset: 0,       # Current position in reply list
               rest: nil
             }
           })
@@ -260,28 +300,33 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
         # user requesting to move the cursor over the list of bulletin board post headers
         <<0, 0, 0x67, direction, _mon::bytes-size(2), _day::bytes-size(2), topic_len::16-big, _topic_text::binary-size(topic_len) >> ->
-          Logger.info("bbs topic pagination request")
+          Logger.info("bbs topic pagination request, direction: #{direction}")
 
           new_offset = case direction do
-            0x01 -> context.bb.offset + 3   # TODO something funky here when doing "read all", then going to select more bulletins
-            0x02 -> context.bb.offset - 3   # TODO ... or here.
-            0x10 -> 0
+            0x01 -> max(0, context.bb.offset - 3)                    # Previous page
+            0x02 -> min(context.bb.offset + 3, length(context.bb.post_ids) - 3)  # Next page
+            0x10 -> 0                                                 # Reset to beginning
+            _ -> context.bb.offset
           end
 
-          new_context = %{context | bb: %{context.bb| offset: new_offset}}
+          new_context = %{context | bb: %{context.bb | offset: new_offset}}
 
           {new_context, {:ok, get_index_page(new_context.bb)}}
 
         # User requested the envelope headers and first 280 bytes of a specific post body
+        # Update the post viewing case to track current post:
         <<0, 0, 0x68, 0, post_id::16-big >> ->
           Logger.info("bbs request for post #{post_id} (header and 1st page)")
 
-          # get the index at post-1, because the context list is 0 indexed whereas the client is 1 indexed
-          {response, rest} = get_post_by_id(Enum.at(context.bb.post_ids, post_id-1))
+          # get the actual database ID
+          actual_post_id = Enum.at(context.bb.post_ids, post_id - 1)
+          {response, rest} = get_post_by_id(actual_post_id)
 
-          # store the remaining post body (anything after first 280 bytes) in the context because the
-          # user will ask for it in their very next call.  This saves an extra database query.
-          new_context = %{context | bb: %{context.bb| rest: rest}}
+          # Update context with current post and rest
+          new_context = %{context | bb: %{context.bb |
+            rest: rest,
+            current_post_id: actual_post_id
+          }}
 
           {new_context, {:ok, response}}
 
@@ -308,20 +353,58 @@ defmodule Prodigy.Server.Service.BulletinBoards do
         # Then get and return the envelope headers and first 280 bytes of the reply id stored at current_reply_offset in reply_ids
         # store the rest of the reply body in the context (can reuse "rest" for this since user cached entirety of
         #   post they arrived here from)
+        # Replace the placeholder implementation:
         <<0, 0, 0x68, 0x28, 0::16-big, mmdd::binary-size(4), hhmm::binary-size(4) >> ->
           Logger.info("populate reply list, get first reply header and first body page")
 
-          #mmdd and hhmm are the "read replies since" values.
+          # Parse the date threshold for replies
+          month = String.to_integer(binary_part(mmdd, 0, 2))
+          day = String.to_integer(binary_part(mmdd, 2, 2))
+          hour = String.to_integer(binary_part(hhmm, 0, 2))
+          minute = String.to_integer(binary_part(hhmm, 2, 2))
 
-          {response, rest} = get_post_by_id(3)
+          current_year = Date.utc_today().year
+          {:ok, threshold_datetime} = NaiveDateTime.new(current_year, month, day, hour, minute, 0)
+          threshold_datetime = DateTime.from_naive!(threshold_datetime, "Etc/UTC")
 
-          {context, {:ok, response}}
+          # Get all replies to the current post (recursively)
+          reply_ids = get_all_replies(context.bb.current_post_id, threshold_datetime)
+
+          Logger.info(inspect(reply_ids, limit: :infinity))
+
+          if length(reply_ids) > 0 do
+            # Get the first reply
+            first_reply_id = hd(reply_ids)
+            {response, rest} = get_post_by_id(first_reply_id, 1)
+
+            # Update context with reply list
+            new_context = %{context | bb: %{context.bb |
+              reply_ids: reply_ids,
+              reply_offset: 0,
+              rest: rest
+            }}
+
+            {new_context, {:ok, response}}
+          else
+            # No replies found - return appropriate response
+            {context, {:ok, <<0x0, 0x0, 0::16-big>>}}  # Adjust based on protocol
+          end
 
         # User requested the rest of the reply body
         <<0, 0, 0x68, 0x61>> ->
           Logger.info("get rest of reply body")
 
-          {context, {:ok, << 0 >>}}
+          response = <<
+            0x0,
+            0x0,
+            byte_size(context.bb.rest || <<>>)::16-big,
+            (context.bb.rest || <<>>)::binary
+          >>
+
+          # Clear the rest from context
+          new_context = %{context | bb: %{context.bb | rest: nil}}
+
+          {new_context, {:ok, response}}
 
         # User requested "next reply"; advance "current_reply_offset" in the context
         # Then get and return the envelope headers and first 280 bytes of the reply id stored at current_reply_offset in reply_ids
@@ -330,13 +413,24 @@ defmodule Prodigy.Server.Service.BulletinBoards do
         <<0, 0, 0x68, 0x21 >> ->
           Logger.info("get next reply header and first body page")
 
-          # get the index at post-1, because the server list is 0 indexed
-          {response, rest} = get_post_by_id(4)
+          # Advance the reply offset
+          new_offset = context.bb.reply_offset + 1
 
-          new_context = %{context | bb: %{context.bb| rest: rest}}
+          if new_offset < length(context.bb.reply_ids) do
+            # Get the next reply
+            next_reply_id = Enum.at(context.bb.reply_ids, new_offset)
+            {response, rest} = get_post_by_id(next_reply_id, new_offset + 1)
 
-          {new_context, {:ok, response}}
+            new_context = %{context | bb: %{context.bb |
+              reply_offset: new_offset,
+              rest: rest
+            }}
 
+            {new_context, {:ok, response}}
+          else
+            # No more replies
+            {context, {:ok, <<0x0, 0x0, 0::16-big>>}}  # Adjust based on protocol
+          end
         _ ->
           Logger.warning(
             "unhandled bulletin board request: #{inspect(request, base: :hex, limit: :infinity)}"
