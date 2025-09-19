@@ -29,16 +29,6 @@ defmodule Prodigy.Server.Service.BulletinBoards do
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Context
 
-  @declaration "When in the Course of human events, it\nbecomes necessary for one people to\ndissolve the political bands which have\nconnected them with another, and to\nassume among the powers of the earth,\nthe separate and equal station to which\nthe Laws of Nature and of Nature's God\nentitle them, a decent respect to the\nopinions of mankind requires that they\nshould declare the causes which impel\nthem to the separation.\n\nWe hold these truths to be\nself-evident, that all men are created\nequal, that they are endowed by their\nCreator with certain unalienable\nRights, that among these are Life,\nLiberty and the pursuit of\nHappiness.--That to secure these\nrights, Governments are instituted\namong Men, deriving their just powers\nfrom the consent of the governed,\n--That whenever any Form of Government\nbecomes destructive of these ends, it\nis the Right of the People to alter or\nto abolish it, and to institute new\nGovernment, laying its foundation on\nsuch principles and organizing its\npowers in such form, as to them shall\nseem most likely to effect their Safety\nand Happiness. Prudence, indeed, will\ndictate that Governments long\nestablished should not be changed for\nlight and transient causes; and\naccordingly all experience hath shewn,\nthat mankind are more disposed to\nsuffer, while evils are sufferable,\nthan to right themselves by abolishing\nthe forms to which they are accustomed.\nBut when a long train of abuses and\nusurpations, pursuing invariably the\nsame Object evinces a design to reduce\nthem under absolute Despotism, it is\ntheir right, it is their duty, to throw\noff such Government, and to provide new\nGuards for their future security.--Such\nhas been the patient sufferance of\nthese Colonies; and such is now the\nnecessity which constrains them to\nalter their former Systems of\nGovernment. The history of the present\nKing of Great Britain is a history of\nrepeated injuries and usurpations, all\nhaving in direct object the\nestablishment of an absolute Tyranny\nover these States. To prove this, let\nFacts be submitted to a candid world."
-
-  defp format_lines(text) do
-    text
-    |> String.split("\n")
-    |> Enum.map(fn line ->
-      String.pad_trailing(line, 40)
-    end)
-  end
-
   def get_post_by_id(id) do
     post = Repo.one(
       from p in Post,
@@ -57,6 +47,7 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
     # Format dates
     sent_mmdd = Calendar.strftime(post.sent_date, "%m%d")
+    sent_hhmm_24hr = Calendar.strftime(post.sent_date, "%H%M")
     last_mmdd = if post.last_reply_date do
       Calendar.strftime(post.last_reply_date, "%m%d")
     else
@@ -77,8 +68,9 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       post.from_id::binary,             # fixed 7 bytes
       sent_mmdd::binary,
       last_mmdd::binary,
-      10000::64-big,                    # dunno
-      (post.in_reply_to || 0)::16-big,
+      sent_mmdd::binary-size(4), sent_hhmm_24hr::binary-size(4),  #   (post timestamp?)
+      (post.in_reply_to || 0)::16-big,  # TODO - nope!  This looks like it needs to be the integer sequence of reply to the post.  e.g., first reply is 1, second is 2.
+#      1,
       (post.reply_count || 0)::16-big,
       0,                                # dunno
       0::16-big,                        # dunno
@@ -86,6 +78,8 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       post.topic.title::binary,
       byte_size(to_name)::16-big,
       to_name::binary,
+      byte_size(post.from_name)::16-big,
+      post.from_name::binary,
       byte_size(post.subject)::16-big,
       post.subject::binary,
       byte_size(post.body)::16-big,
@@ -167,15 +161,11 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
   def handle(%Fm0{payload: <<0x3, payload::binary>>} = request, %Context{} = context) do
 
-    lines = format_lines(@declaration)
-    first = Enum.take(lines, 7) |> Enum.join
-    rest = Enum.drop(lines, 7) |> Enum.join
-    _total = byte_size(first) + byte_size(rest)
-
-
     Logger.info("bbs got payload #{inspect(payload, base: :hex, limit: :infinity)}")
     {context, response} =
       case payload do
+
+        # user has entered a bulletin board, we need to get the last date they read it to populate the UI
         << 0, 0, 0x65, bbs_handle::bytes-size(3) >> ->
           club = Repo.get_by(Club, handle: bbs_handle)
           response = case club do
@@ -183,14 +173,18 @@ defmodule Prodigy.Server.Service.BulletinBoards do
               Logger.error("Club with handle #{bbs_handle} not found")
               << 0, 0xFF::16, 0::32, 0::16-big >>
             %Club{name: name} ->
-              << 0, 0::16, 0::32, byte_size(name)::16-big, name::binary >>
+              <<
+                0,
+                0::16,
+                "0914"::binary,           # TODO need a schema to store user's last read MMDD per club; what do we default to?
+                byte_size(name)::16-big,
+                name::binary
+              >>
           end
           {context, {:ok, response}}
 
-
-        <<0, 0, 0xF, bbs_handle::bytes-size(3), 0xC>> -> # topics
-          Logger.info("got topic request for bbs with handle #{bbs_handle}")
-
+        # user requested a list of topics for a specified bulletin board
+        <<0, 0, 0xF, bbs_handle::bytes-size(3), 0xC>> ->
           club = Club
                  |> where([c], c.handle == ^bbs_handle)
                  |> preload(topics: ^from(t in Topic, order_by: [asc: t.id]))
@@ -225,9 +219,10 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
           {context, {:ok, response}}
 
-        # first request for bulletin posts - establishes a cursor
-        #              v-- do not include older bulletins with replies since given date
-        #         v------- get bulletins
+        # user requested a list of bulletin board post headers beginning with the given date / time
+        # select all posts in the bulletin board / topic that were posted since then, or any posts with replies posted since then
+        # ... then, we put that list of post_ids into the context for the user to paginate over
+        # ... then, we return the first page of post details
         <<0, 0, 0x67, 0x24, mon::bytes-size(2), day::bytes-size(2), min::bytes-size(2), hour::bytes-size(2), topic_id::16-big >> ->
           Logger.info("start cursor for bbs topic #{topic_id}")
 
@@ -261,23 +256,15 @@ defmodule Prodigy.Server.Service.BulletinBoards do
             }
           })
 
-          # TODO assuming 1k posts and a 4 byte id, this will store 4k in the context for the user
-          #   if we instead did a limit/offset query each time, that would require only offset be stored, but if could
-          #   be inconsistent if a new post were made that matches the filter criteria - we send the total count on
-          #   the initial request
-
           {context, {:ok, get_index_page(context.bb)}}
 
-        # subsequent request for bulletin posts - navigate over cursor, store position in context
-        # post pagination; direction: 0x1=next, 0x2=back; 0x16=reset?
-        #                 v--- pagination direction: 0x1=next, 0x2=prev
-        #         v----------- get bulletins
+        # user requesting to move the cursor over the list of bulletin board post headers
         <<0, 0, 0x67, direction, _mon::bytes-size(2), _day::bytes-size(2), topic_len::16-big, _topic_text::binary-size(topic_len) >> ->
           Logger.info("bbs topic pagination request")
 
           new_offset = case direction do
-            0x01 -> context.bb.offset - 3
-            0x02 -> context.bb.offset + 3
+            0x01 -> context.bb.offset + 3   # TODO something funky here when doing "read all", then going to select more bulletins
+            0x02 -> context.bb.offset - 3   # TODO ... or here.
             0x10 -> 0
           end
 
@@ -285,41 +272,20 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
           {new_context, {:ok, get_index_page(new_context.bb)}}
 
-
-        # Ok, so, the way content is returned, it seems that the rendering doesn't respect
-        # any formatting characters like \n.  So, it seems that bulletin posts probably filled
-        # every line with whitespace in lieu of \n.
-        #
-        # so when the RS wants a single post, they ask for it by post_id.  the header fields are
-        # returned along with, ideally, the first page of data.  That can be up to 7 lines, 40
-        # columns each.
-        #
-        # If we are economizing on database space and storing \n instead of all the white space,
-        # then we need to split on \n, fill lines to 40 chars with whitespace, then join the lines.
-        #
-        # THis means for the first page, we would return 7*40=280 bytes exactly  (or less if only one page)
-        # and the rest in the second call that follows.
-        #
-        # One important thing - we obviously need to cache the current topic index map to
-        # translate to database table id column values.  Should we also cache the "rest" of a
-        # post in the context so that we only hit the database one time for each message?  Seems
-        # like a good idea.
-
-        # Retrieve single post header & first page
+        # User requested the envelope headers and first 280 bytes of a specific post body
         <<0, 0, 0x68, 0, post_id::16-big >> ->
           Logger.info("bbs request for post #{post_id} (header and 1st page)")
 
-          # get the index at post-1, because the server list is 0 indexed
+          # get the index at post-1, because the context list is 0 indexed whereas the client is 1 indexed
           {response, rest} = get_post_by_id(Enum.at(context.bb.post_ids, post_id-1))
 
-          # TODO is this a good idea?  store the rest of the post in the cursor?  We know the user will request
-          #   it immediately, and this saves another database round-trip
-
+          # store the remaining post body (anything after first 280 bytes) in the context because the
+          # user will ask for it in their very next call.  This saves an extra database query.
           new_context = %{context | bb: %{context.bb| rest: rest}}
 
           {new_context, {:ok, response}}
 
-        # Retrieve rest of post
+        # User requested the rest of the post body
         <<0, 0, 0x68, 0x40, post_id::16-big >> ->
           Logger.info("bbs request for post #{post_id} (rest or subsequent?)")
 
@@ -330,10 +296,46 @@ defmodule Prodigy.Server.Service.BulletinBoards do
             context.bb.rest::binary
           >>
 
+          # clear the extraneous data from the context
           new_context = %{context | bb: %{context.bb| rest: nil}}
 
           {new_context, {:ok, response}}
 
+        # User requested replies for the post they're currently looking at, beginning on given date/time stamp
+        # get the current post_id from the context, then recursively query for posts "in_reply_to" that post_id
+        # store this list in the context as the "reply_ids"
+        # store current_reply_offset = 0 in the context
+        # Then get and return the envelope headers and first 280 bytes of the reply id stored at current_reply_offset in reply_ids
+        # store the rest of the reply body in the context (can reuse "rest" for this since user cached entirety of
+        #   post they arrived here from)
+        <<0, 0, 0x68, 0x28, 0::16-big, mmdd::binary-size(4), hhmm::binary-size(4) >> ->
+          Logger.info("populate reply list, get first reply header and first body page")
+
+          #mmdd and hhmm are the "read replies since" values.
+
+          {response, rest} = get_post_by_id(3)
+
+          {context, {:ok, response}}
+
+        # User requested the rest of the reply body
+        <<0, 0, 0x68, 0x61>> ->
+          Logger.info("get rest of reply body")
+
+          {context, {:ok, << 0 >>}}
+
+        # User requested "next reply"; advance "current_reply_offset" in the context
+        # Then get and return the envelope headers and first 280 bytes of the reply id stored at current_reply_offset in reply_ids
+        # store the rest of the reply body in the context (can reuse "rest" for this since user cached entirety of
+        #   post they arrived here from)
+        <<0, 0, 0x68, 0x21 >> ->
+          Logger.info("get next reply header and first body page")
+
+          # get the index at post-1, because the server list is 0 indexed
+          {response, rest} = get_post_by_id(4)
+
+          new_context = %{context | bb: %{context.bb| rest: rest}}
+
+          {new_context, {:ok, response}}
 
         _ ->
           Logger.warning(
