@@ -8,61 +8,42 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
   require Logger
 
-  alias Prodigy.Core.Data.{Club, Post, Repo, Topic, User}
+  alias Prodigy.Core.Data.{Club, Post, Repo, Topic, User, UserClub}
   alias Prodigy.Server.Protocol.Dia.Packet, as: DiaPacket
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Context
 
-  # ============================================================================
-  # Public API
-  # ============================================================================
-
   def handle(%Fm0{payload: <<0x3, payload::binary>>} = request, %Context{} = context) do
-    Logger.info("bbs got payload #{inspect(payload, base: :hex, limit: :infinity)}")
+    {context, response} = case payload do
+      # Enter club
+      <<0, 0, 0x65, club_handle::bytes-size(3)>> ->
+        handle_enter_club(club_handle, context)
 
-    {context, response} = route_request(payload, context)
+      # List topics for club
+      <<0, 0, 0xF, club_handle::bytes-size(3), 0xC>> ->
+        handle_list_topics(club_handle, context)
 
-    case response do
-      {:ok, payload} -> {:ok, context, DiaPacket.encode(Fm0.make_response(payload, request))}
-      _ -> {:ok, context}
-    end
-  end
-
-  # ============================================================================
-  # Request Routing
-  # ============================================================================
-
-  defp route_request(payload, context) do
-    case payload do
-      # Enter bulletin board
-      <<0, 0, 0x65, bbs_handle::bytes-size(3)>> ->
-        handle_enter_board(bbs_handle, context)
-
-      # List topics for bulletin board
-      <<0, 0, 0xF, bbs_handle::bytes-size(3), 0xC>> ->
-        handle_list_topics(bbs_handle, context)
-
-      # Start cursor for posts since date/time
+      # Start cursor for notes since date/time
       <<0, 0, 0x67, 0x24, mon::bytes-size(2), day::bytes-size(2), min::bytes-size(2),
         hour::bytes-size(2), topic_id::16-big>> ->
-        handle_start_post_cursor(mon, day, min, hour, topic_id, context)
+        handle_start_note_cursor(mon, day, min, hour, topic_id, context)
 
-      # Navigate post headers
+      # Navigate note headers
       <<0, 0, 0x67, direction, _mon::bytes-size(2), _day::bytes-size(2),
         topic_len::16-big, _topic_text::binary-size(topic_len)>> ->
-        handle_navigate_posts(direction, context)
+        handle_navigate_note_cursor(direction, context)
 
-      # Get post header and first page
-      <<0, 0, 0x68, 0, post_id::16-big>> ->
-        handle_get_post_first_page(post_id, context)
+      # Get note header and first page
+      <<0, 0, 0x68, 0, note_id::16-big>> ->
+        handle_get_note_first(note_id, context)
 
       # Get rest of post body
-      <<0, 0, 0x68, 0x40, post_id::16-big>> ->
-        handle_get_post_rest(post_id, context)
+      <<0, 0, 0x68, 0x40, note_id::16-big>> ->
+        handle_get_note_rest(note_id, context)
 
       # Get replies for current post
       <<0, 0, 0x68, 0x28, 0::16-big, mmdd::binary-size(4), hhmm::binary-size(4)>> ->
-        handle_get_replies(mmdd, hhmm, context)
+        handle_start_reply_traversal(mmdd, hhmm, context)
 
       # Get rest of reply body
       <<0, 0, 0x68, 0x61>> ->
@@ -75,25 +56,36 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       _ ->
         handle_unknown_request(payload, context)
     end
+
+    case response do
+      {:ok, payload} -> {:ok, context, DiaPacket.encode(Fm0.make_response(payload, request))}
+      _ -> {:ok, context}
+    end
   end
 
   # ============================================================================
   # Request Handlers
   # ============================================================================
 
-  defp handle_enter_board(bbs_handle, context) do
-    club = Repo.get_by(Club, handle: bbs_handle)
+  defp handle_enter_club(club_handle, context) do
+    club = Repo.get_by(Club, handle: club_handle)
 
     response = case club do
       nil ->
-        Logger.error("Club with handle #{bbs_handle} not found")
+        Logger.warn("Club with handle #{club_handle} not found")
         <<0, 0xFF::16, 0::32, 0::16-big>>
 
-      %Club{name: name} ->
+      %Club{id: club_id, name: name} ->
+        # Get or create the user's last read date for this club
+        last_read_mmdd = get_last_read_mmdd(context.user.id, club_id)
+
+        # Store club_id in context for later use
+        context = Map.put(context, :current_club_id, club_id)
+
         <<
           0,
           0::16,
-          "0914"::binary,  # TODO: Store user's last read MMDD per club
+          last_read_mmdd::binary-size(4),
           byte_size(name)::16-big,
           name::binary
         >>
@@ -102,15 +94,15 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {context, {:ok, response}}
   end
 
-  defp handle_list_topics(bbs_handle, context) do
+  defp handle_list_topics(club_handle, context) do
     club = Club
-           |> where([c], c.handle == ^bbs_handle)
+           |> where([c], c.handle == ^club_handle)
            |> preload(topics: ^from(t in Topic, order_by: [asc: t.id]))
            |> Repo.one()
 
     topics = if club, do: club.topics, else: []
 
-    if is_nil(club), do: Logger.warn("Club with handle #{bbs_handle} not found")
+    if is_nil(club), do: Logger.warn("Club with handle #{club_handle} not found")
 
     topics_binary = build_topics_binary(topics)
 
@@ -125,15 +117,18 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {context, {:ok, response}}
   end
 
-  defp handle_start_post_cursor(mon, day, min, hour, topic_id, context) do
-    Logger.info("start cursor for bbs topic #{topic_id}")
+  defp handle_start_note_cursor(mon, day, min, hour, topic_id, context) do
+    Logger.debug("Starting note cursor for topic #{topic_id} from #{mon}/#{day} #{hour}:#{min}")
 
     threshold_datetime = parse_datetime(mon, day, min, hour)
-    post_ids = get_posts_since_threshold(topic_id, threshold_datetime)
+    note_ids = get_posts_since_threshold(topic_id, threshold_datetime)
+
+    topic = Repo.get(Topic, topic_id)
+    update_last_read_date(context.user.id, topic.club_id)
 
     context = Map.merge(context, %{
       bb: %{
-        post_ids: post_ids,
+        note_ids: note_ids,
         offset: 0,
         topic_id: topic_id,
         current_post_id: nil,
@@ -146,19 +141,19 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {context, {:ok, get_index_page(context.bb)}}
   end
 
-  defp handle_navigate_posts(direction, context) do
-    Logger.info("bbs topic pagination request, direction: #{direction}")
+  defp handle_navigate_note_cursor(direction, context) do
+    Logger.debug("note pagination, direction: #{direction}")
 
-    new_offset = calculate_new_offset(direction, context.bb.offset, length(context.bb.post_ids))
+    new_offset = calculate_new_offset(direction, context.bb.offset, length(context.bb.note_ids))
     new_context = %{context | bb: %{context.bb | offset: new_offset}}
 
     {new_context, {:ok, get_index_page(new_context.bb)}}
   end
 
-  defp handle_get_post_first_page(post_id, context) do
-    Logger.info("bbs request for post #{post_id} (header and 1st page)")
+  defp handle_get_note_first(note_id, context) do
+    Logger.debug("Getting note #{note_id} header and first page")
 
-    actual_post_id = Enum.at(context.bb.post_ids, post_id - 1)
+    actual_post_id = Enum.at(context.bb.note_ids, note_id - 1)
     {response, rest} = get_post_by_id(actual_post_id)
 
     new_context = %{context | bb: %{context.bb |
@@ -169,8 +164,8 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {new_context, {:ok, response}}
   end
 
-  defp handle_get_post_rest(_post_id, context) do
-    Logger.info("bbs request for post rest")
+  defp handle_get_note_rest(_note_id, context) do
+    Logger.debug("Getting rest of note body")
 
     response = <<
       0x0,
@@ -183,45 +178,15 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {new_context, {:ok, response}}
   end
 
-  defp handle_get_replies(mmdd, hhmm, context) do
-    Logger.info("populate reply list, get first reply header and first body page")
-    Logger.info("Raw input - mmdd: #{inspect(mmdd, base: :hex)}, hhmm: #{inspect(hhmm, base: :hex)}")
-
+  defp handle_start_reply_traversal(mmdd, hhmm, context) do
     threshold_datetime = parse_datetime_from_mmdd_hhmm(mmdd, hhmm)
-    Logger.info("Parsed threshold datetime: #{inspect(threshold_datetime)}")
-
     replies_with_dates = get_all_replies_with_dates(context.bb.current_post_id)
-    Logger.info("Found #{length(replies_with_dates)} total replies for post #{context.bb.current_post_id}")
-
-    # Log first few reply dates for comparison
-    replies_with_dates
-    |> Enum.take(5)
-    |> Enum.each(fn %{id: id, sent_date: date} ->
-      Logger.info("Reply #{id} sent_date: #{inspect(date)}")
-    end)
-
     reply_ids = Enum.map(replies_with_dates, & &1.id)
-
     starting_offset = find_reply_starting_offset(replies_with_dates, threshold_datetime)
-    Logger.info("Starting offset: #{starting_offset}")
-
     available_replies = length(reply_ids) - starting_offset
-    Logger.info("Available replies after threshold: #{available_replies}")
-
-    # Log the comparison results for debugging
-    if length(replies_with_dates) > 0 do
-      replies_with_dates
-      |> Enum.with_index()
-      |> Enum.take(3)
-      |> Enum.each(fn {%{sent_date: date}, idx} ->
-        comparison = NaiveDateTime.compare(date, threshold_datetime)
-        Logger.info("Reply #{idx}: #{inspect(date)} vs threshold #{inspect(threshold_datetime)} = #{comparison}")
-      end)
-    end
 
     if available_replies > 0 do
       first_reply_id = Enum.at(reply_ids, starting_offset)
-      Logger.info("Returning first reply id: #{first_reply_id} at offset #{starting_offset}")
 
       {response, rest} = get_post_by_id(first_reply_id, starting_offset + 1)
 
@@ -233,13 +198,12 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
       {new_context, {:ok, response}}
     else
-      Logger.info("No replies found after threshold")
       {context, {:ok, <<0x0, 0x0, 0::16-big>>}}
     end
   end
 
   defp handle_get_reply_rest(context) do
-    Logger.info("get rest of reply body")
+    Logger.debug("Getting rest of reply body")
 
     response = <<
       0x0,
@@ -253,7 +217,7 @@ defmodule Prodigy.Server.Service.BulletinBoards do
   end
 
   defp handle_get_next_reply(context) do
-    Logger.info("get next reply header and first body page")
+    Logger.debug("Getting next reply")
 
     new_offset = context.bb.reply_offset + 1
 
@@ -298,12 +262,8 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     hour = String.to_integer(binary_part(hhmm, 0, 2))
     minute = String.to_integer(binary_part(hhmm, 2, 2))
 
-    Logger.info("Parsing datetime - Month: #{month}, Day: #{day}, Hour: #{hour}, Minute: #{minute}")
-
     current_year = Date.utc_today().year
     {:ok, threshold_datetime} = NaiveDateTime.new(current_year, month, day, hour, minute, 0)
-
-    Logger.info("Created NaiveDateTime: #{inspect(threshold_datetime)}")
 
     threshold_datetime
   end
@@ -330,25 +290,21 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     case direction do
       0x01 -> max(0, current_offset - 3)                           # Previous page
       0x02 -> min(current_offset + 3, total_posts - 3)            # Next page
+      # 0x04 -> ?
       0x10 -> 0                                                     # Reset to beginning
       _ -> current_offset
     end
   end
 
   defp find_reply_starting_offset(replies_with_dates, threshold_datetime) do
-    Logger.info("Finding starting offset for threshold: #{inspect(threshold_datetime)}")
 
     result = replies_with_dates
              |> Enum.find_index(fn %{sent_date: date} ->
       comparison = NaiveDateTime.compare(date, threshold_datetime)
       is_after_or_equal = comparison in [:gt, :eq]
-      Logger.info("  Comparing #{inspect(date)}: #{comparison}, passes: #{is_after_or_equal}")
-      is_after_or_equal
     end)
 
     offset = result || 0
-    Logger.info("find_reply_starting_offset calculated: #{inspect(result)}, returning: #{offset}")
-    offset
   end
 
   # ============================================================================
@@ -368,20 +324,36 @@ defmodule Prodigy.Server.Service.BulletinBoards do
   end
 
   # ============================================================================
-  # Existing Helper Functions (unchanged)
+  # Reply Tree Queries
   # ============================================================================
 
-  defp get_all_replies(post_id, threshold_datetime) do
+  # Consolidated function for all reply tree queries
+  defp get_reply_tree(post_id, opts \\ []) do
+    # Build the recursive CTE base
+    base_query = build_reply_tree_base(post_id)
+
+    # Apply options
+    base_query
+    |> apply_threshold_filter(Keyword.get(opts, :threshold))
+    |> apply_reply_select(Keyword.get(opts, :select, :ids))
+    |> Repo.all()
+    |> format_reply_result(Keyword.get(opts, :select, :ids))
+  end
+
+  defp build_reply_tree_base(post_id) do
+    # Initial query: direct replies to the given post
     initial_query =
       Post
       |> where([p], p.in_reply_to == ^post_id)
       |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
 
+    # Recursive query: replies to replies
     recursion_query =
       Post
       |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
       |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
 
+    # Combine them
     reply_tree_query =
       initial_query
       |> union_all(^recursion_query)
@@ -390,62 +362,42 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     |> recursive_ctes(true)
     |> with_cte("reply_tree", as: ^reply_tree_query)
     |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
-    |> where([p, rt], rt.sent_date >= ^threshold_datetime)
     |> order_by([p, rt], asc: rt.sent_date)
-    |> select([p, rt], rt.id)
-    |> Repo.all()
+  end
+
+  defp apply_threshold_filter(query, nil), do: query
+  defp apply_threshold_filter(query, threshold_datetime) do
+    where(query, [p, rt], rt.sent_date >= ^threshold_datetime)
+  end
+
+  defp apply_reply_select(query, :ids) do
+    select(query, [p, rt], rt.id)
+  end
+  defp apply_reply_select(query, :with_dates) do
+    select(query, [p, rt], %{id: rt.id, sent_date: rt.sent_date})
+  end
+
+  defp format_reply_result(result, :ids), do: result
+  defp format_reply_result(result, :with_dates) do
+    result  # Already in the right format
+  end
+
+  # Wrapper functions for backward compatibility and clarity
+  defp get_all_replies(post_id, threshold_datetime) do
+    get_reply_tree(post_id, threshold: threshold_datetime, select: :ids)
   end
 
   defp get_all_replies_with_dates(post_id) do
-    initial_query =
-      Post
-      |> where([p], p.in_reply_to == ^post_id)
-      |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
-
-    recursion_query =
-      Post
-      |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
-      |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
-
-    reply_tree_query =
-      initial_query
-      |> union_all(^recursion_query)
-
-    Post
-    |> recursive_ctes(true)
-    |> with_cte("reply_tree", as: ^reply_tree_query)
-    |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
-    |> order_by([p, rt], asc: rt.sent_date)
-    |> select([p, rt], %{id: rt.id, sent_date: rt.sent_date})
-    |> Repo.all()
+    get_reply_tree(post_id, select: :with_dates)
   end
 
   defp get_all_replies_with_max_date(post_id) do
-    initial_query =
-      Post
-      |> where([p], p.in_reply_to == ^post_id)
-      |> select([p], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
+    replies = get_reply_tree(post_id, select: :with_dates)
 
-    recursion_query =
-      Post
-      |> join(:inner, [p], rt in "reply_tree", on: p.in_reply_to == rt.id)
-      |> select([p, rt], %{id: p.id, sent_date: p.sent_date, in_reply_to: p.in_reply_to})
-
-    reply_tree_query =
-      initial_query
-      |> union_all(^recursion_query)
-
-    result = Post
-             |> recursive_ctes(true)
-             |> with_cte("reply_tree", as: ^reply_tree_query)
-             |> join(:inner, [p], rt in "reply_tree", on: p.id == rt.id)
-             |> select([p, rt], %{id: rt.id, sent_date: rt.sent_date})
-             |> Repo.all()
-
-    case result do
+    case replies do
       [] ->
         {[], nil}
-      replies ->
+      _ ->
         ids = Enum.map(replies, & &1.id)
         max_date = replies
                    |> Enum.map(& &1.sent_date)
@@ -520,15 +472,15 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     {response, rest}
   end
 
-  defp get_index_page(%{post_ids: post_ids, offset: offset}, page_size \\ 3) do
-    page_post_ids = Enum.slice(post_ids, offset, page_size)
-    total_posts = length(post_ids)
-    posts_this_page = length(page_post_ids)
+  defp get_index_page(%{note_ids: note_ids, offset: offset}, page_size \\ 3) do
+    page_note_ids = Enum.slice(note_ids, offset, page_size)
+    total_notes = length(note_ids)
+    notes_this_page = length(page_note_ids)
 
-    posts_data = if posts_this_page > 0 do
-      posts_with_stats = Repo.all(
+    notes_data = if notes_this_page > 0 do
+      notes_with_stats = Repo.all(
         from p in Post,
-        where: p.id in ^page_post_ids,
+        where: p.id in ^page_note_ids,
         left_join: r in Post, on: r.in_reply_to == p.id,
         left_join: u in User, on: u.id == p.from_id,
         group_by: [p.id, p.sent_date, p.to_name, p.from_id, p.subject, u.first_name, u.last_name],
@@ -544,7 +496,7 @@ defmodule Prodigy.Server.Service.BulletinBoards do
         }
       )
 
-      posts_with_stats
+      notes_with_stats
       |> Enum.map(fn post ->
         sent_mmdd = Calendar.strftime(post.sent_date, "%m%d")
         last_reply_mmdd = if post.last_reply_date do
@@ -569,16 +521,54 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       <<>>
     end
 
-    res = <<
+    <<
       0x1,
       0x0,
       0x0::32-big,
-      total_posts::16-big,
-      posts_this_page::16-big,
-      posts_data::binary
+      total_notes::16-big,
+      notes_this_page::16-big,
+      notes_data::binary
     >>
+  end
 
-    Logger.warning(inspect(res, base: :hex, limit: :infinity))
-    res
+  defp get_last_read_mmdd(user_id, club_id) do
+    case Repo.get_by(UserClub, user_id: user_id, club_id: club_id) do
+      nil ->
+        # Never read this club before, return today's date
+        # This ensures they only see new posts going forward
+        today = Date.utc_today()
+        Calendar.strftime(today, "%m%d")
+
+      %UserClub{last_read_date: last_read} ->
+        Calendar.strftime(last_read, "%m%d")
+    end
+  end
+
+  defp update_last_read_date(user_id, club_id) do
+    now = DateTime.utc_now()
+
+    case Repo.get_by(UserClub, user_id: user_id, club_id: club_id) do
+      nil ->
+        # First time reading this club, create the record
+        %UserClub{}
+        |> UserClub.changeset(%{
+          user_id: user_id,
+          club_id: club_id,
+          last_read_date: now
+        })
+        |> Repo.insert()
+
+      existing ->
+        # Update existing record
+        existing
+        |> UserClub.changeset(%{last_read_date: now})
+        |> Repo.update()
+    end
+    |> case do
+         {:ok, _} ->
+           Logger.debug("Updated last read date for user #{user_id} in club #{club_id}")
+         {:error, changeset} ->
+           Logger.error("Failed to update last read date: #{inspect(changeset.errors)}")
+       end
   end
 end
