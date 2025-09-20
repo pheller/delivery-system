@@ -413,14 +413,17 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       from p in Post,
       where: p.id == ^id,
       left_join: r in Post, on: r.in_reply_to == p.id,
-      left_join: u in User, on: u.id == p.from_id,
+      left_join: from_user in User, on: from_user.id == p.from_id,
+      left_join: to_user in User, on: to_user.id == p.to_name and p.to_name != "" and not is_nil(p.to_name),
       preload: [:topic],
-      group_by: [p.id, u.first_name, u.last_name],
+      group_by: [p.id, from_user.first_name, from_user.last_name, to_user.first_name, to_user.last_name],
       select: %Post{p |
         reply_count: count(r.id),
         last_reply_date: max(r.sent_date),
         from_name: fragment("COALESCE(? || ' ' || ?, ?, ?)",
-          u.first_name, u.last_name, u.first_name, p.from_id)
+          from_user.first_name, from_user.last_name, from_user.first_name, p.from_id),
+        to_name: fragment("COALESCE(? || ' ' || ?, ?, ?)",
+          to_user.first_name, to_user.last_name, to_user.first_name, p.to_name)
       }
     )
 
@@ -482,8 +485,9 @@ defmodule Prodigy.Server.Service.BulletinBoards do
         from p in Post,
         where: p.id in ^page_note_ids,
         left_join: r in Post, on: r.in_reply_to == p.id,
-        left_join: u in User, on: u.id == p.from_id,
-        group_by: [p.id, p.sent_date, p.to_name, p.from_id, p.subject, u.first_name, u.last_name],
+        left_join: from_user in User, on: from_user.id == p.from_id,
+        left_join: to_user in User, on: to_user.id == p.to_name and p.to_name != "" and not is_nil(p.to_name),
+        group_by: [p.id, p.sent_date, p.to_name, p.from_id, p.subject, from_user.first_name, from_user.last_name, to_user.first_name, to_user.last_name],
         order_by: [asc: p.sent_date],
         select: %{
           sent_date: p.sent_date,
@@ -491,8 +495,10 @@ defmodule Prodigy.Server.Service.BulletinBoards do
           subject: p.subject,
           reply_count: count(r.id),
           last_reply_date: max(r.sent_date),
-          from_name: fragment("COALESCE(? || ' ' || ?, ? || '', ?)",
-            u.first_name, u.last_name, u.first_name, p.from_id)
+          from_name: fragment("COALESCE(? || ' ' || ?, ?, ?)",
+            from_user.first_name, from_user.last_name, from_user.first_name, p.from_id),
+          to_name: fragment("COALESCE(? || ' ' || ?, ?, ?)",
+            to_user.first_name, to_user.last_name, to_user.first_name, p.to_name)
         }
       )
 

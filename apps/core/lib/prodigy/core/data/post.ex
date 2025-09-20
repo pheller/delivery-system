@@ -26,6 +26,7 @@ defmodule Prodigy.Core.Data.Post do
     belongs_to(:topic, Prodigy.Core.Data.Topic)
     field(:sent_date, :utc_datetime)
     field(:in_reply_to, :integer)  # NULL for top-level posts, post_id for replies
+  # TODO change to_name to to_id - empty means ALL
     field(:to_name, :string, default: "")  # Empty defaults to "All"
     field(:from_id, :string)  # user_id from posting context
     field(:subject, :string)
