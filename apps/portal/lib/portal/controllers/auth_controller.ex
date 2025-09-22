@@ -4,10 +4,11 @@ defmodule Prodigy.Portal.AuthController do
   alias Prodigy.Portal.UserManager
   alias Prodigy.Portal.UserManager.Guardian
 
+  require Logger
+
   plug Ueberauth
 
   def request(conn, _params) do
-    # render(conn, "request.html", callback_url: Helpers.callback_url(conn))
     conn
   end
 
@@ -28,7 +29,7 @@ defmodule Prodigy.Portal.AuthController do
   def callback(conn, _) do
     error = "Unexpected auth response"
 
-    IO.puts(error)
+    Logger.error("unexpected auth response: #{inspect(error)}")
 
     conn
     |> put_flash(:error, error)

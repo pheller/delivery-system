@@ -32,7 +32,7 @@ defmodule Prodigy.Portal.ConnCase do
   end
 
   setup tags do
-    Prodigy.Portal.DataCase.setup_sandbox(tags)
+    Prodigy.Portal.RepoCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

@@ -10,7 +10,12 @@ defmodule Prodigy.Portal.SessionHTML do
         <.input field={@form[:username]} label="Username" />
         <.input field={@form[:password]} label="Password" type="password" id="password-input" />
         <div class="flex flex-row gap-2">
-          <.input type="checkbox"autocomplete="off" name="password-visibility" phx-click={JS.toggle_attribute({"type", "password", "text"}, to: "#password-input")} />
+          <.input
+            type="checkbox"
+            autocomplete="off"
+            name="password-visibility"
+            phx-click={JS.toggle_attribute({"type", "password", "text"}, to: "#password-input")}
+          />
           <.icon name="hero-eye" />
         </div>
         <:actions>

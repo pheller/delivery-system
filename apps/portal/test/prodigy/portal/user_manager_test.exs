@@ -1,4 +1,4 @@
-defmodule Prodigy.Portal.UserManagerTests do
+defmodule Prodigy.Portal.UserManagerTest do
   use Prodigy.Portal.RepoCase, async: true
 
   alias Pbkdf2
@@ -14,7 +14,7 @@ defmodule Prodigy.Portal.UserManagerTests do
 
   test "create_user/1 with valid username, password creates a user" do
     assert {:ok, %PortalUser{} = user} = UserManager.create_user(@valid_attrs)
-    assert {:ok, user} == Pbkdf2.check_pass(user, "some password", hash_key: :password)
+    assert {:ok, user} == Pbkdf2.check_pass(user, "some password", hash_key: :password_hashed)
     assert user.username == "some username"
   end
 

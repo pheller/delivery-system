@@ -26,12 +26,11 @@ defmodule Prodigy.Portal.RegistrationController do
   def create(conn, %{"user" => %{"username" => username, "password" => password}}) do
     with nil <- UserManager.get_user_by(%{username: username}),
          {:ok, _user} <- UserManager.create_user(%{username: username, password: password}) do
-        Logger.info("user created successfully")
+      Logger.info("user created successfully")
 
-        conn
-        |> put_flash(:info, "User created successfully")
-        |> redirect(to: ~p"/login")
-
+      conn
+      |> put_flash(:info, "User created successfully")
+      |> redirect(to: ~p"/login")
     else
       error ->
         Logger.error("user create failed: #{inspect(error)}")
@@ -42,5 +41,4 @@ defmodule Prodigy.Portal.RegistrationController do
         |> render(:new)
     end
   end
-
 end
