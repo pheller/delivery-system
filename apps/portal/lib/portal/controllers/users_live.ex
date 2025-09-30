@@ -3,16 +3,17 @@ defmodule Prodigy.Portal.UsersLive do
 
   alias Prodigy.Portal.Models.Users
 
-
   def mount(_params, _session, socket) do
     users = Users.list_users()
     users_online = Users.list_online_users()
 
-    socket = assign(socket, page_title: "Service Users Online", users: users, users_online: users_online)
+    socket =
+      assign(socket, page_title: "Service Users Online", users: users, users_online: users_online)
+
     {:ok, socket}
   end
 
-  def handle_params(unsigned_params, uri, socket) do
+  def handle_params(_unsigned_params, _uri, socket) do
     # TODO will need some pubsub linkage to trigger a refresh on a db change
     # PubSub.subscribe("session_changes")
     # and, on the Server, we'll do PubSub.broadcast_from!(self(), "session_changes", ?, ?)

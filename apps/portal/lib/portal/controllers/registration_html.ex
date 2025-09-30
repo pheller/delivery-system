@@ -1,14 +1,15 @@
-defmodule Prodigy.Portal.SessionHTML do
+defmodule Prodigy.Portal.RegistrationHTML do
   use Prodigy.Portal, :html
 
   def new(assigns) do
     ~H"""
     <div class="max-w-md m-20">
-      <header class="font-bold">Login to an existing account</header>
+      <header class="font-bold">Register a new account</header>
 
-      <.simple_form for={@form} action={~p"/login"}>
+      <.simple_form for={@form} action={~p"/register"}>
         <.input field={@form[:username]} label="Username" />
         <.input field={@form[:password]} label="Password" type="password" id="password-input" />
+        <span class="italic">don't lose this!</span>
         <div class="flex flex-row gap-2">
           <.input
             type="checkbox"
@@ -18,14 +19,15 @@ defmodule Prodigy.Portal.SessionHTML do
           />
           <.icon name="hero-eye" />
         </div>
+
         <:actions>
-          <.button>Login</.button>
+          <.button>Create Account</.button>
         </:actions>
       </.simple_form>
 
       <div class="my-16">
-        <span>Not yet set up?</span>
-        <.button_link href="/register">Create new account instead</.button_link>
+        <span>Already have an account?</span>
+        <.button_link href="/login">Login instead</.button_link>
       </div>
     </div>
     """

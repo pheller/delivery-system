@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: prodigy
       POSTGRES_PASSWORD: prodigy
       POSTGRES_DB: prodigy
+    ports:
+      - "5432:5432"
   server:
     build:
       context: .
@@ -34,6 +36,8 @@ services:
       - DB_HOST=db
       - MIX_ENV=prod
       - SECRET_KEY_BASE=r6ygfUoemC9s6HPcZYwm9EGAC/+Xt6NmcvAidvW7wN2Yd2k3TpuetRZTB5Juvvy0
+      - GITHUB_CLIENT_ID=identifier
+      - GITHUB_CLIENT_SECRET=secret
     depends_on:
       - db
 

@@ -15,7 +15,10 @@
 
 defmodule Prodigy.Core.Data.Portal.User do
   use Ecto.Schema
+
   import Ecto.Changeset
+
+  alias Ecto.Changeset
 
   @moduledoc """
   Schema specific to individual users and related change functions
@@ -23,22 +26,38 @@ defmodule Prodigy.Core.Data.Portal.User do
 
   alias Pbkdf2
 
-  @primary_key {:username, :string, []}
   schema "portal_user" do
-    # TODO the server is using comeonin_ecto_password - which is the better approach?  pick one
-    field(:password, :string)
+    field :username, :string
+    field :password, :string, virtual: true
+    field :password_hashed, :string
+
+    # :github requires :provider_uid, :password requires :password, :sandbox temporarily no requirements
+    field :provider, Ecto.Enum, values: [:github, :password, :sandbox]
+    field :provider_uid, :integer
+
+    timestamps()
   end
 
-  def changeset(user, attrs \\ %{}) do
+  def changeset(user, %{provider: :github} = attrs) do
     user
-    |> Ecto.Changeset.cast(attrs, [:username, :password])
+    |> cast(attrs, [:provider, :provider_uid, :username])
+    |> validate_required([:provider, :provider_uid, :username])
+  end
+
+  def changeset(user, attrs) do
+    user
+    |> cast(attrs, [:username, :password])
     |> validate_required([:username, :password])
+    |> change(provider: :password)
     |> put_password_hash()
   end
 
-  defp put_password_hash(%Ecto.Changeset{valid?: true, changes: %{password: password}} = changeset) do
-    change(changeset, password: Pbkdf2.hash_pwd_salt(password))
+  defp put_password_hash(%Changeset{valid?: true, changes: %{password: password}} = changeset) do
+    changeset
+    |> change(password_hashed: Pbkdf2.hash_pwd_salt(password))
+    |> delete_change(:password)
   end
 
   defp put_password_hash(changeset), do: changeset
+
 end

@@ -35,23 +35,27 @@ defmodule Prodigy.Portal.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:ecto_sql, "~> 3.0"},
       {:phoenix, "~> 1.7.2"},
       {:phoenix_ecto, "~> 4.4"},
       {:phoenix_html, "~> 3.3"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:phoenix_live_view, "~> 0.18.16"},
-      {:floki, ">= 0.30.0", only: :test},
-      {:phoenix_live_dashboard, "~> 0.7.2"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:floki, ">= 0.37.0", only: :test},
+      {:phoenix_live_dashboard, "~> 0.8.7"},
       {:esbuild, "~> 0.7", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2.0", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 0.6"},
       {:telemetry_poller, "~> 1.0"},
-      {:gettext, "~> 0.20"},
+      {:gettext, "~> 0.26.2"},
       {:jason, "~> 1.2"},
       {:plug_cowboy, "~> 2.5"},
       {:guardian, "~> 2.3"},
       {:pbkdf2_elixir, "~> 1.0"},
-      {:core, in_umbrella: true}
+      {:swoosh, "~> 1.19"},
+      {:hackney, "~> 1.25"},
+      {:core, in_umbrella: true},
+      {:ueberauth_github, "~> 0.8"}
     ]
   end
 

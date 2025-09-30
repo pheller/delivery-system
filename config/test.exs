@@ -24,10 +24,13 @@ config :portal, Prodigy.Portal.Endpoint,
 
 config :core, Prodigy.Core.Data.Repo,
   database: "prodigytest",
-  username: "prodigytest",
-  password: "prodigytest",
+  username: "prodigy",
+  password: "prodigy",
   hostname: "localhost",
   pool: Ecto.Adapters.SQL.Sandbox
+
+config :portal, Prodigy.Portal.UserManager.Guardian,
+       secret_key: "test_secret"
 
 config :server,
   auth_timeout: 3000
