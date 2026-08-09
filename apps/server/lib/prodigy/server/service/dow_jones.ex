@@ -432,6 +432,99 @@ defmodule Prodigy.Server.Service.DowJones do
     {:ok, context, DiaPacket.encode(response)}
   end
 
+  # HI500010 host-index (0x040210): quote-track saved lists. '01' load returns
+  # the user's lists (ZDJ0006B parses them). MOCK: two canned lists. Response:
+  #   status(1)='0' | reserved(6) | count(2) | per-list entry, each =
+  #   [2-byte-binary len][2-digit name-len][name][6-byte symbols: type '1'/'5'/'8'
+  #   + 5-char ticker]. '03'/'04' (save/delete = maint) not modeled yet.
+  def handle(
+        %Fm0{dest: 0x040210, payload: <<"HI500010", _rest::binary>>} = request,
+        %Context{} = context
+      ) do
+    Logger.info("dow_jones HI500010 quote-track list load (MOCK)")
+
+    lists = [
+      {"QUOTE TRACK 1", [{"1", "IBM"}, {"1", "GM"}, {"1", "AAPL"}]},
+      {"QUOTE TRACK 2", [{"1", "MSFT"}, {"1", "XRX"}, {"1", "GT"}]}
+    ]
+
+    entries =
+      for {name, syms} <- lists, into: "" do
+        sym_bin =
+          for {t, s} <- syms, into: "", do: t <> String.pad_trailing(String.slice(s, 0, 5), 5)
+
+        content =
+          String.pad_leading(Integer.to_string(byte_size(name)), 2, "0") <> name <> sym_bin
+
+        <<byte_size(content)::16>> <> content
+      end
+
+    count = lists |> length() |> Integer.to_string() |> String.pad_leading(2, "0")
+    payload = "0" <> String.duplicate(" ", 6) <> count <> entries
+
+    response = %{
+      request
+      | concatenated: false,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        fm4: nil,
+        fm9: nil,
+        fm64: nil,
+        payload: payload
+    }
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Batch quote (quote-track, DJ 0x067201): payload = [type][5-char sym + space]xN
+  # [0x0D] with type ',' (0x2C stock) / '/' (0x2F bond) / '+' (0x2B fund). Reply is
+  # concatenated per-symbol entries [1-byte len][field-code 0x04][flag 0x00]
+  # [change 9][open 10][high 10][low 10][last 10][volume 10], each rendered by the
+  # row program ZDJA0012. Must sit AFTER the single-symbol clauses (guarded on
+  # length so a 7-byte single quote never lands here).
+  def handle(%Fm0{payload: <<op, body::binary>>} = request, %Context{} = context)
+      when op in [0x2C, 0x2F, 0x2B, 0x2D] and byte_size(body) >= 7 do
+    symbols =
+      body
+      |> String.trim_trailing(<<0x0D>>)
+      |> to_charlist()
+      |> Enum.chunk_every(6)
+      |> Enum.map(fn c -> c |> Enum.take(5) |> to_string() |> String.trim() end)
+      |> Enum.reject(&(&1 == ""))
+
+    Logger.info("dow_jones batch quote (MOCK): #{inspect(symbols)}")
+
+    entries =
+      for sym <- symbols, into: "" do
+        {chg, opn, hi, lo, last, vol} =
+          try do
+            q = decode_quote(sym)
+
+            {fnum(q.regularMarketChange, 9), fnum(q.regularMarketOpen, 10),
+             fnum(q.regularMarketDayHigh, 10), fnum(q.regularMarketDayLow, 10),
+             fnum(q.regularMarketPrice, 10),
+             fstr(Number.Delimit.number_to_delimited(q.regularMarketVolume), 10)}
+          rescue
+            _ -> {fstr("", 9), fstr("", 10), fstr("", 10), fstr("", 10), fstr("", 10), fstr("", 10)}
+          end
+
+        content = <<0x04, 0x00>> <> chg <> opn <> hi <> lo <> last <> vol
+        <<byte_size(content)::8>> <> content
+      end
+
+    response = %{
+      request
+      | concatenated: true,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        payload: entries
+    }
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
   # Catch-all for Dow Jones transactions we don't model yet (the maint
   # list-state HI500010 loader, quote-track saved-list load/store, etc).
   #
@@ -462,6 +555,16 @@ defmodule Prodigy.Server.Service.DowJones do
     }
 
     {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Fixed-width field formatters for batch-quote rows (left-justified, padded/
+  # truncated to exactly w columns).
+  defp fnum(n, w) do
+    :io_lib.format("~.2f", [n * 1.0]) |> List.to_string() |> fstr(w)
+  end
+
+  defp fstr(s, w) do
+    s |> to_string() |> String.slice(0, w) |> String.pad_trailing(w)
   end
 
   # Shared FM64 error reply for a failed quote lookup.
