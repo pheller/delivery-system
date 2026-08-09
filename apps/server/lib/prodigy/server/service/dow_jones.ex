@@ -342,51 +342,62 @@ defmodule Prodigy.Server.Service.DowJones do
   end
 
   # HFH host-index query (DID 0x040210): DJ company/fund name search. Client
-  # ZZDJ0091 sends "HI400010"+..+'1'+mode+'  '+name; the picker (ZZDJ0065WND via
-  # ZZDJ0070) parses our reply as:
+  # ZZDJ0091 sends "HI400010"+..+'1'+<mode>+'  '+name; the picker (ZZDJ0065WND
+  # via ZZDJ0070) parses our reply as:
   #   status(1)='0' | reserved(6) | page-count(2) | total(5) | token(5) | rows
-  #   each row = [2-digit content-len][5-char ticker][1 sep][name]
-  # MOCK: up to 3 synthetic matches derived from the search term (single-level;
-  # symbol rows only, so the group drill-down stays dormant). Real host-index DB
-  # can replace this later.
+  #   each row = [2-byte-binary content-len][5-char ticker][1 sep][name]
+  # The mode byte drives the two search levels:
+  #   '0'  -> GROUP mode: return fund-family group names (ticker field unused;
+  #           the client re-queries members by the selected group NAME).
+  #   else -> SYMBOL rows ('1'/'5'/'8' = direct name search, '9' = members of a
+  #           picked group).
+  # MOCK: synthetic results derived from the search term. Replace the `matches`
+  # computation with a real host-index database lookup to hook this to reality.
   def handle(
         %Fm0{dest: 0x040210, payload: <<"HI400010", rest::binary>>} = request,
         %Context{} = context
       ) do
-    name =
-      rest
-      |> to_string()
-      |> String.split("  ", parts: 2)
-      |> List.last()
-      |> String.trim()
-      |> String.upcase()
+    # Query body is '1' + mode + '  ' + name (after the HI400010 descriptor/len);
+    # the mode is the last char before the double-space separator.
+    {mode, name} =
+      case String.split(to_string(rest), "  ", parts: 2) do
+        [prefix, nm] -> {String.last(prefix), nm |> String.trim() |> String.upcase()}
+        _ -> {nil, ""}
+      end
 
-    Logger.info("dow_jones host-index name search: #{inspect(name)}")
+    Logger.info("dow_jones host-index search: mode=#{inspect(mode)} name=#{inspect(name)}")
 
     matches =
-      if name == "" do
-        []
-      else
-        base = name |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 4)
+      cond do
+        name == "" ->
+          []
 
-        # 10 synthetic matches -> 3 picker pages (4+4+2) so NEXT/BACK paging is
-        # exercised (both active on the middle page).
-        descriptors = [
-          "MOCK CORP",
-          "HOLDINGS INC",
-          "INDUSTRIES",
-          "TECHNOLOGIES",
-          "GROUP",
-          "PARTNERS",
-          "SYSTEMS",
-          "ENTERPRISES",
-          "GLOBAL",
-          "CAPITAL"
-        ]
+        mode == "0" ->
+          # GROUP mode: a handful of fund families (single page). Ticker field is
+          # unused for group rows, so a placeholder is fine.
+          ["FUNDS", "FAMILY OF FUNDS", "GROUP", "INDEX TRUST", "PARTNERS"]
+          |> Enum.with_index()
+          |> Enum.map(fn {suffix, i} -> {"GRP" <> <<?A + i>> <> "0", "#{name} #{suffix}"} end)
 
-        for {desc, i} <- Enum.with_index(descriptors) do
-          {"#{base}#{<<?A + i>>}", "#{name} #{desc}"}
-        end
+        true ->
+          # SYMBOL / member mode: real tickers + names. 10 rows -> 3 picker pages
+          # (4+4+2) so NEXT/BACK paging is exercised (both active on the middle).
+          base = name |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 4)
+
+          [
+            "MOCK CORP",
+            "HOLDINGS INC",
+            "INDUSTRIES",
+            "TECHNOLOGIES",
+            "GROWTH FUND",
+            "INCOME FUND",
+            "VALUE FUND",
+            "INDEX FUND",
+            "GLOBAL FUND",
+            "BALANCED FUND"
+          ]
+          |> Enum.with_index()
+          |> Enum.map(fn {desc, i} -> {"#{base}#{<<?A + i>>}", "#{name} #{desc}"} end)
       end
 
     rows =
