@@ -443,8 +443,11 @@ defmodule Prodigy.Server.Service.DowJones do
       ) do
     Logger.info("dow_jones HI500010 quote-track list load (MOCK)")
 
+    # LIST 1 has 12 symbols -> 3 pages (5/page) so NEXT/BACK paging is exercised.
+    list1 = for s <- ~w(IBM GM AAPL MSFT XRX GT F KO GE HPQ INTC T), do: {"1", s}
+
     lists = [
-      {"QUOTE TRACK 1", [{"1", "IBM"}, {"1", "GM"}, {"1", "AAPL"}]},
+      {"QUOTE TRACK 1", list1},
       {"QUOTE TRACK 2", [{"1", "MSFT"}, {"1", "XRX"}, {"1", "GT"}]}
     ]
 
@@ -557,14 +560,15 @@ defmodule Prodigy.Server.Service.DowJones do
     {:ok, context, DiaPacket.encode(response)}
   end
 
-  # Fixed-width field formatters for batch-quote rows (left-justified, padded/
-  # truncated to exactly w columns).
+  # Fixed-width field formatters for batch-quote rows. Values are RIGHT-justified
+  # in their w-column slots so last/change/volume line up under their headers
+  # (ZDJA0012 reads each from a fixed offset; right-justify aligns the columns).
   defp fnum(n, w) do
     :io_lib.format("~.2f", [n * 1.0]) |> List.to_string() |> fstr(w)
   end
 
   defp fstr(s, w) do
-    s |> to_string() |> String.slice(0, w) |> String.pad_trailing(w)
+    s |> to_string() |> String.slice(0, w) |> String.pad_leading(w)
   end
 
   # Shared FM64 error reply for a failed quote lookup.
