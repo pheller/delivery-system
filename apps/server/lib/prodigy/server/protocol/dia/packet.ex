@@ -93,7 +93,10 @@ defmodule Prodigy.Server.Protocol.Dia.Packet do
   end
 
   @spec decode(binary(), Fm0.t()) :: {:ok, Fm0.t()}
-  def decode(<<length, 4, user_id::binary-size(7), 0, rest::binary>> = _data, fm0) do
+  # The byte after the 7-char user id is the FM4 TX header. The authentic
+  # Prodigy client sends '0' (0x30); a later change assumed 0x00. Accept
+  # either (any value) so both the real client and EaasySabre parse.
+  def decode(<<length, 4, user_id::binary-size(7), _txhdr, rest::binary>> = _data, fm0) do
     correlation_id_length = length - 10
     <<correlation_id::binary-size(correlation_id_length), payload::binary>> = rest
 
@@ -164,7 +167,8 @@ defmodule Prodigy.Server.Protocol.Dia.Packet do
   @spec encode(Fm4.t()) :: binary()
   def encode(%Fm4{} = packet) do
     length = byte_size(packet.correlation_id) + 10
-    <<length, 4, packet.user_id::binary-size(7), 0, packet.correlation_id::binary>>
+    # Emit the authentic FM4 TX header byte '0' (0x30) the real client expects.
+    <<length, 4, packet.user_id::binary-size(7), "0", packet.correlation_id::binary>>
   end
 
   @spec encode(Fm9.t()) :: binary()

@@ -149,7 +149,11 @@ defmodule Prodigy.Server.Router do
         0x020200 ->
           Cmc
 
-        # 0x040210 -> QuoteTrack # get this when trying to go into quote track 1 or 2 on dow jones
+        # HFH host-index channel. DJ company/fund name search sends HI400010
+        # queries here; quote-track also uses it (not yet modeled).
+        0x040210 ->
+          DowJones
+
         # 0x060201 -> Banking
 
         0x063201 ->

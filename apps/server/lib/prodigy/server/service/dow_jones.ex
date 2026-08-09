@@ -204,4 +204,273 @@ defmodule Prodigy.Server.Service.DowJones do
 
     {:ok, context, DiaPacket.encode(response)}
   end
+
+  # Mutual fund quote (opcode 0x2B '+'): only NAV (close) and volume are
+  # meaningful; open/high/low/last render blank (see +DBURX reference). Reuses
+  # field-code 0x04 so the client renders it through the same program (ZZDJ0122)
+  # as a stock.
+  def handle(
+        %Fm0{dest: _dest, payload: <<0x2B, symbol::binary-size(5), 0xD>>} = request,
+        %Context{} = context
+      ) do
+    response =
+      try do
+        quote = decode_quote(symbol)
+        short_name = (quote.shortName || symbol) |> to_string() |> String.upcase()
+        :ets.insert_new(:dow_jones, {symbol, short_name})
+        blank = String.duplicate(" ", 10)
+
+        data =
+          List.to_string(:io_lib.format("~-10.2f", [quote.regularMarketPrice])) <>
+            blank <>
+            blank <>
+            blank <>
+            blank <>
+            List.to_string(
+              :io_lib.format("~-10.s", [
+                Number.Delimit.number_to_delimited(quote.regularMarketVolume)
+              ])
+            )
+
+        %{
+          request
+          | concatenated: true,
+            src: request.dest,
+            dest: request.src,
+            mode: %Fm0.Mode{response: true},
+            payload: <<0x3D, 0x04, 0x0>> <> data
+        }
+      rescue
+        e ->
+          Logger.warning("dow_jones fund quote failed for '#{symbol}': #{Exception.message(e)}")
+          dj_quote_error(request)
+      end
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Stock-option quote (opcode 0x2D '-'): full field set, same shape as a stock
+  # (see -GMCO reference).
+  def handle(
+        %Fm0{dest: _dest, payload: <<0x2D, symbol::binary-size(5), 0xD>>} = request,
+        %Context{} = context
+      ) do
+    response =
+      try do
+        quote = decode_quote(symbol)
+        short_name = (quote.shortName || symbol) |> to_string() |> String.upcase()
+        :ets.insert_new(:dow_jones, {symbol, short_name})
+
+        data =
+          List.to_string(
+            :io_lib.format(
+              "~-10.2f~-10.2f~-10.2f~-10.2f~-10.2f~-10.s",
+              [
+                quote.regularMarketChange,
+                quote.regularMarketOpen,
+                quote.regularMarketDayHigh,
+                quote.regularMarketDayLow,
+                quote.regularMarketPrice,
+                Number.Delimit.number_to_delimited(quote.regularMarketVolume)
+              ]
+            )
+          )
+
+        %{
+          request
+          | concatenated: true,
+            src: request.dest,
+            dest: request.src,
+            mode: %Fm0.Mode{response: true},
+            payload: <<0x3D, 0x04, 0x0>> <> data
+        }
+      rescue
+        e ->
+          Logger.warning(
+            "dow_jones option quote failed for '#{symbol}': #{Exception.message(e)}"
+          )
+
+          dj_quote_error(request)
+      end
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Bond quote (opcode 0x2F '/'): no reference screenshot exists, so this is a
+  # best-guess modeled on the stock shape (full field set). Revisit if a real
+  # bond example turns up.
+  def handle(
+        %Fm0{dest: _dest, payload: <<0x2F, symbol::binary-size(5), 0xD>>} = request,
+        %Context{} = context
+      ) do
+    response =
+      try do
+        quote = decode_quote(symbol)
+        short_name = (quote.shortName || symbol) |> to_string() |> String.upcase()
+        :ets.insert_new(:dow_jones, {symbol, short_name})
+
+        data =
+          List.to_string(
+            :io_lib.format(
+              "~-10.2f~-10.2f~-10.2f~-10.2f~-10.2f~-10.s",
+              [
+                quote.regularMarketChange,
+                quote.regularMarketOpen,
+                quote.regularMarketDayHigh,
+                quote.regularMarketDayLow,
+                quote.regularMarketPrice,
+                Number.Delimit.number_to_delimited(quote.regularMarketVolume)
+              ]
+            )
+          )
+
+        %{
+          request
+          | concatenated: true,
+            src: request.dest,
+            dest: request.src,
+            mode: %Fm0.Mode{response: true},
+            payload: <<0x3D, 0x04, 0x0>> <> data
+        }
+      rescue
+        e ->
+          Logger.warning("dow_jones bond quote failed for '#{symbol}': #{Exception.message(e)}")
+          dj_quote_error(request)
+      end
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # HFH host-index query (DID 0x040210): DJ company/fund name search. Client
+  # ZZDJ0091 sends "HI400010"+..+'1'+mode+'  '+name; the picker (ZZDJ0065WND via
+  # ZZDJ0070) parses our reply as:
+  #   status(1)='0' | reserved(6) | page-count(2) | total(5) | token(5) | rows
+  #   each row = [2-digit content-len][5-char ticker][1 sep][name]
+  # MOCK: up to 3 synthetic matches derived from the search term (single-level;
+  # symbol rows only, so the group drill-down stays dormant). Real host-index DB
+  # can replace this later.
+  def handle(
+        %Fm0{dest: 0x040210, payload: <<"HI400010", rest::binary>>} = request,
+        %Context{} = context
+      ) do
+    name =
+      rest
+      |> to_string()
+      |> String.split("  ", parts: 2)
+      |> List.last()
+      |> String.trim()
+      |> String.upcase()
+
+    Logger.info("dow_jones host-index name search: #{inspect(name)}")
+
+    matches =
+      if name == "" do
+        []
+      else
+        base = name |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 4)
+
+        # 10 synthetic matches -> 3 picker pages (4+4+2) so NEXT/BACK paging is
+        # exercised (both active on the middle page).
+        descriptors = [
+          "MOCK CORP",
+          "HOLDINGS INC",
+          "INDUSTRIES",
+          "TECHNOLOGIES",
+          "GROUP",
+          "PARTNERS",
+          "SYSTEMS",
+          "ENTERPRISES",
+          "GLOBAL",
+          "CAPITAL"
+        ]
+
+        for {desc, i} <- Enum.with_index(descriptors) do
+          {"#{base}#{<<?A + i>>}", "#{name} #{desc}"}
+        end
+      end
+
+    rows =
+      for {ticker, cname} <- matches, into: "" do
+        content = String.pad_trailing(String.slice(ticker, 0, 5), 5) <> " " <> cname
+        # Per-row length is a 2-byte BINARY integer (client reads it via MOVE ABS),
+        # unlike the ASCII header counts.
+        <<byte_size(content)::16>> <> content
+      end
+
+    count = length(matches)
+
+    header =
+      "0" <>
+        String.duplicate(" ", 6) <>
+        (count |> Integer.to_string() |> String.pad_leading(2, "0")) <>
+        (count |> Integer.to_string() |> String.pad_leading(5, "0")) <>
+        String.duplicate(" ", 5)
+
+    response = %{
+      request
+      | concatenated: false,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        fm4: nil,
+        fm9: nil,
+        fm64: nil,
+        payload: header <> rows
+    }
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Catch-all for Dow Jones transactions we don't model yet (the maint
+  # list-state HI500010 loader, quote-track saved-list load/store, etc).
+  #
+  # MOCK: log the full request wire format so each transaction can be mapped
+  # precisely, and return a graceful "success / no data" reply so the client
+  # degrades to empty lists offline instead of CM4-ing the connection.
+  #
+  # The reply's first byte is "0" (the OK status the client's ZZDJ0007 checks)
+  # followed by a zeroed body whose 8th/9th bytes read as a "00" list count;
+  # this is best-effort until the layout is confirmed against a live capture.
+  # Replace with specific handle/2 clauses as each txn is mapped from the logs.
+  def handle(%Fm0{} = request, %Context{} = context) do
+    Logger.info(
+      "dow_jones UNMODELED txn (MOCK): dest=#{inspect(request.dest, base: :hex)} " <>
+        "payload=#{inspect(request.payload, base: :hex, limit: :infinity)}"
+    )
+
+    response = %{
+      request
+      | concatenated: false,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        fm4: nil,
+        fm9: nil,
+        fm64: nil,
+        payload: <<"0", 0::48, "00">>
+    }
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
+  # Shared FM64 error reply for a failed quote lookup.
+  defp dj_quote_error(request) do
+    fm64 = %Fm64{
+      concatenated: false,
+      status_type: Fm64.StatusType.ERROR,
+      data_mode: Fm64.DataMode.BINARY,
+      payload: <<"A", "DJI00001", 0x1::16-big>>
+    }
+
+    %{
+      request
+      | concatenated: true,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        fm4: nil,
+        fm64: fm64,
+        payload: <<>>
+    }
+  end
 end
