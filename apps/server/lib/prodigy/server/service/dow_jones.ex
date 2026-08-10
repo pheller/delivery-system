@@ -436,7 +436,7 @@ defmodule Prodigy.Server.Service.DowJones do
   # side's backend as well as quote-track's read side. Stateful (ETS now, keyed
   # per user; Postgres later). The wire message is:
   #   descriptor(18) = "HI500010" <> "00012Y" <> <<0,0,0,0>>
-  #   <> <<bodylen>> <> body
+  #   <> <<bodylen::16>> <> body   (bodylen is a 2-byte binary)
   # where body starts with a 2-char op code (ZDJ0006A GOTO_DEPENDING_ON P1 is
   # 1-indexed: '01' load, '03' save, '04' delete):
   #   '01' load   : "01" <> uid(7) <> P2         -> return all the user's lists
@@ -452,7 +452,10 @@ defmodule Prodigy.Server.Service.DowJones do
           request,
         %Context{} = context
       ) do
-    <<_bodylen, op::binary-size(2), rest::binary>> = body
+    # The body length is a 2-byte binary (big-endian), same as the row content
+    # lengths the client reads via MOVE ABS - e.g. "QUOTE TRACK 1" load-one is
+    # <<0x00, 0x1A>> (26 = "022315" + uid(7) + name(13)).
+    <<_bodylen::16, op::binary-size(2), rest::binary>> = body
     user_id = context.user.id
 
     payload =
