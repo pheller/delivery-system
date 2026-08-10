@@ -473,11 +473,15 @@ defmodule Prodigy.Server.Service.DowJones do
           hi500010_loadone_payload(user_id, listname)
 
         "03" ->
-          # rest = uid(7) <> listname <> <<0x00, len2, symbols::size(len2)>>. The
-          # bodylen only covered "03"+uid+listname, so split listname at the 0x00.
-          <<_uid::binary-size(7), tail::binary>> = rest
-          [listname, sympart] = :binary.split(tail, <<0x00>>)
-          <<len2, symblob::binary-size(len2)>> = sympart
+          # bodylen covers "03"+uid(7)+listname, so listname length is
+          # deterministic (bodylen - 9). After it: 2-byte flag (0x0000) then a
+          # 2-byte symbol-blob length, then N*6-byte symbols (type + ticker(5)).
+          # All lengths are 2-byte binary, same MOVE ABS convention as the load.
+          Logger.info("dow_jones HI500010 '03' RAW bodylen=#{_bodylen} " <>
+            "rest=#{inspect(rest, base: :hex, limit: :infinity)}")
+          nlen = max(_bodylen - 9, 0)
+          <<_uid::binary-size(7), listname::binary-size(nlen), _flag::16, len2::16,
+            symblob::binary-size(len2)>> = rest
           syms = parse_symbols(symblob)
           Logger.info("dow_jones HI500010 save (MOCK) user=#{user_id} " <>
             "list=#{inspect(listname)} syms=#{inspect(syms)}")
