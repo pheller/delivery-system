@@ -444,6 +444,52 @@ defmodule Prodigy.Server.Service.DowJones do
   #                 1-byte-length-prefixed symbols blob (N x 6 bytes: type(1) +
   #                 ticker(5, space-padded)) -> replace that list's symbols
   #   '04' delete : "04" <> uid(7) <> ticker     -> drop the symbol from the list
+  # HI600010 host-index (0x040210): Company News (Dow Jones News/Retrieval).
+  # ZDJO0005 request = "HI600010" <> "00003" <> mode(1) <> offset(4) <> 0x0005 <>
+  # symbol(5). mode 'X' = first page, else a continuation from `offset`.
+  # First-page response (parsed by ZDJO0005 proc_1):
+  #   status(1)='0' | offset(4) | V(2)=namelen+9 | storycount(4) | gap(5) |
+  #   name(namelen) | storydata. storycount 0 -> the client shows
+  #   "no news stories". MOCK: a couple of canned stories per symbol; the
+  #   synthesized ZDJO0004 renders storydata into the article view.
+  def handle(
+        %Fm0{dest: 0x040210, payload: <<"HI600010", rest::binary>>} = request,
+        %Context{} = context
+      ) do
+    <<_desc::binary-size(5), _mode::binary-size(1), _offset::binary-size(4),
+      _len::binary-size(2), symbol::binary-size(5)>> = rest
+    sym = String.trim(symbol)
+    Logger.info("dow_jones HI600010 company news (MOCK) sym=#{inspect(sym)}")
+
+    {name, stories} = news_for(sym)
+    count = length(stories)
+    storydata = Enum.join(stories, "\r")
+    v = byte_size(name) + 9
+
+    payload =
+      "0" <>
+        <<0::32>> <>
+        <<v::16>> <>
+        <<count::32>> <>
+        <<0::40>> <>
+        name <>
+        storydata
+
+    response = %{
+      request
+      | concatenated: false,
+        src: request.dest,
+        dest: request.src,
+        mode: %Fm0.Mode{response: true},
+        fm4: nil,
+        fm9: nil,
+        fm64: nil,
+        payload: payload
+    }
+
+    {:ok, context, DiaPacket.encode(response)}
+  end
+
   # ZDJ0006B parses the '01' response: status(1)='0' | reserved(6) | count(2) |
   # per-list entry, each = [2-byte-binary len][2-digit name-len][name][6-byte
   # symbols]. The client keys lists by SYS_NAVIGATE_KEYWORD ("QUOTE TRACK 1/2").
@@ -669,6 +715,37 @@ defmodule Prodigy.Server.Service.DowJones do
 
     count = syms |> length() |> Integer.to_string() |> String.pad_leading(2, "0")
     "0" <> String.duplicate(" ", 6) <> "0" <> count <> entries
+  end
+
+  # Company-news mock: {company name, [story, ...]}. Each story is a text blob
+  # "MM/DD/YY headline\ntext..."; the synthesized ZDJO0004 renders the first
+  # story into the article view. Empty list -> "no news stories" path.
+  defp news_for("GM") do
+    {"GENERAL MOTORS CORP",
+     [
+       "08/17/90 GM Idles Plant In California; Firms Plan Weekly Output\n" <>
+         "   DETROIT -- General Motors Corp. said the six-day strike at a parts " <>
+         "plant in Flint, Mich., forced the company to idle the Van Nuys, Calif., " <>
+         "assembly plant that builds the Pontiac Firebird and Chevrolet Camaro.\n" <>
+         "   The California facility was closed yesterday, putting about 3,500 " <>
+         "employees out of work. It will reopen Monday.",
+       "08/16/90 GM Reports Higher Quarterly Earnings On Truck Demand\n" <>
+         "   DETROIT -- General Motors Corp. posted improved quarterly results, " <>
+         "citing strong demand for light trucks and cost controls."
+     ]}
+  end
+
+  defp news_for(sym) when sym in ["", nil], do: {"", []}
+
+  defp news_for(sym) do
+    name = qt_short_name(sym)
+
+    {name,
+     [
+       "08/17/90 #{name} In Focus As Analysts Weigh Outlook\n" <>
+         "   NEW YORK -- Analysts said #{name} remains a closely watched name " <>
+         "this week as investors weigh the company's near-term outlook."
+     ]}
   end
 
   # Display name for a ticker: ETS name cache, else decode_quote, else the ticker.
