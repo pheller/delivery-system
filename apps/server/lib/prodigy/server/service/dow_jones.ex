@@ -462,7 +462,9 @@ defmodule Prodigy.Server.Service.DowJones do
     Logger.info("dow_jones HI600010 company news (MOCK) sym=#{inspect(sym)}")
 
     {name, stories} = news_for(sym)
-    count = length(stories)
+    # Story count is read by ZDJO0005 via DIVIDE (string->number), so it must be
+    # ASCII digits, NOT binary. V (@6-7) is read via MOVE ABS, so it stays binary.
+    count = stories |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
     storydata = Enum.join(stories, "\r")
     v = byte_size(name) + 9
 
@@ -470,7 +472,7 @@ defmodule Prodigy.Server.Service.DowJones do
       "0" <>
         <<0::32>> <>
         <<v::16>> <>
-        <<count::32>> <>
+        count <>
         <<0::40>> <>
         name <>
         storydata
