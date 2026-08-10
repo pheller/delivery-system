@@ -432,38 +432,66 @@ defmodule Prodigy.Server.Service.DowJones do
     {:ok, context, DiaPacket.encode(response)}
   end
 
-  # HI500010 host-index (0x040210): quote-track saved lists. '01' load returns
-  # the user's lists (ZDJ0006B parses them). MOCK: two canned lists. Response:
-  #   status(1)='0' | reserved(6) | count(2) | per-list entry, each =
-  #   [2-byte-binary len][2-digit name-len][name][6-byte symbols: type '1'/'5'/'8'
-  #   + 5-char ticker]. '03'/'04' (save/delete = maint) not modeled yet.
+  # HI500010 host-index (0x040210): quote-track saved lists. This is the WRITE
+  # side's backend as well as quote-track's read side. Stateful (ETS now, keyed
+  # per user; Postgres later). The wire message is:
+  #   descriptor(18) = "HI500010" <> "00012Y" <> <<0,0,0,0>>
+  #   <> <<bodylen>> <> body
+  # where body starts with a 2-char op code (ZDJ0006A GOTO_DEPENDING_ON P1 is
+  # 1-indexed: '01' load, '03' save, '04' delete):
+  #   '01' load   : "01" <> uid(7) <> P2         -> return all the user's lists
+  #   '03' save   : "03" <> uid(7) <> listname   then a trailing 0x00 flag and a
+  #                 1-byte-length-prefixed symbols blob (N x 6 bytes: type(1) +
+  #                 ticker(5, space-padded)) -> replace that list's symbols
+  #   '04' delete : "04" <> uid(7) <> ticker     -> drop the symbol from the list
+  # ZDJ0006B parses the '01' response: status(1)='0' | reserved(6) | count(2) |
+  # per-list entry, each = [2-byte-binary len][2-digit name-len][name][6-byte
+  # symbols]. The client keys lists by SYS_NAVIGATE_KEYWORD ("QUOTE TRACK 1/2").
   def handle(
-        %Fm0{dest: 0x040210, payload: <<"HI500010", _rest::binary>>} = request,
+        %Fm0{dest: 0x040210, payload: <<"HI500010", _desc::binary-size(10), body::binary>>} =
+          request,
         %Context{} = context
       ) do
-    Logger.info("dow_jones HI500010 quote-track list load (MOCK)")
+    <<_bodylen, op::binary-size(2), rest::binary>> = body
+    user_id = context.user.id
 
-    # LIST 1 has 12 symbols -> 3 pages (5/page) so NEXT/BACK paging is exercised.
-    list1 = for s <- ~w(IBM GM AAPL MSFT XRX GT F KO GE HPQ INTC T), do: {"1", s}
+    payload =
+      case op do
+        "01" ->
+          Logger.info("dow_jones HI500010 list load (MOCK) user=#{user_id}")
+          hi500010_load_payload(user_id)
 
-    lists = [
-      {"QUOTE TRACK 1", list1},
-      {"QUOTE TRACK 2", [{"1", "MSFT"}, {"1", "XRX"}, {"1", "GT"}]}
-    ]
+        "02" ->
+          # Maint single-list load: "02" <> "23" <> "15" <> uid(7) <> listname.
+          <<_p1::binary-size(2), _p2::binary-size(2), _uid::binary-size(7),
+            listname::binary>> = rest
+          Logger.info("dow_jones HI500010 load-one (MOCK) user=#{user_id} " <>
+            "list=#{inspect(listname)}")
+          hi500010_loadone_payload(user_id, listname)
 
-    entries =
-      for {name, syms} <- lists, into: "" do
-        sym_bin =
-          for {t, s} <- syms, into: "", do: t <> String.pad_trailing(String.slice(s, 0, 5), 5)
+        "03" ->
+          # rest = uid(7) <> listname <> <<0x00, len2, symbols::size(len2)>>. The
+          # bodylen only covered "03"+uid+listname, so split listname at the 0x00.
+          <<_uid::binary-size(7), tail::binary>> = rest
+          [listname, sympart] = :binary.split(tail, <<0x00>>)
+          <<len2, symblob::binary-size(len2)>> = sympart
+          syms = parse_symbols(symblob)
+          Logger.info("dow_jones HI500010 save (MOCK) user=#{user_id} " <>
+            "list=#{inspect(listname)} syms=#{inspect(syms)}")
+          put_list(user_id, listname, syms)
+          "0" <> String.duplicate(" ", 6) <> "00"
 
-        content =
-          String.pad_leading(Integer.to_string(byte_size(name)), 2, "0") <> name <> sym_bin
+        "04" ->
+          <<_uid::binary-size(7), delsym::binary>> = rest
+          ticker = delsym |> String.slice(0, 6) |> String.replace_prefix("1", "") |> String.trim()
+          Logger.info("dow_jones HI500010 delete (MOCK) user=#{user_id} sym=#{inspect(ticker)}")
+          delete_symbol(user_id, ticker)
+          "0" <> String.duplicate(" ", 6) <> "00"
 
-        <<byte_size(content)::16>> <> content
+        other ->
+          Logger.warning("dow_jones HI500010 unknown op #{inspect(other)} (MOCK)")
+          "0" <> String.duplicate(" ", 6) <> "00"
       end
-
-    count = lists |> length() |> Integer.to_string() |> String.pad_leading(2, "0")
-    payload = "0" <> String.duplicate(" ", 6) <> count <> entries
 
     response = %{
       request
@@ -569,6 +597,105 @@ defmodule Prodigy.Server.Service.DowJones do
 
   defp fstr(s, w) do
     s |> to_string() |> String.slice(0, w) |> String.pad_leading(w)
+  end
+
+  # --- HI500010 quote-track saved-list store (per-user, ETS) -----------------
+  # Seeded on first read so quote-track shows data offline; LIST 1 has 12 symbols
+  # (3 pages) to exercise paging. Keyed {:qt_list, user_id, name} in :dow_jones.
+  @qt_default_lists %{
+    "QUOTE TRACK 1" =>
+      for(s <- ~w(IBM GM AAPL MSFT XRX GT F KO GE HPQ INTC T), do: {"1", s}),
+    "QUOTE TRACK 2" => [{"1", "MSFT"}, {"1", "XRX"}, {"1", "GT"}]
+  }
+  @qt_list_names ["QUOTE TRACK 1", "QUOTE TRACK 2"]
+
+  defp qt_key(user_id, name), do: {:qt_list, user_id, name}
+
+  defp get_list(user_id, name) do
+    case :ets.lookup(:dow_jones, qt_key(user_id, name)) do
+      [{_, syms}] ->
+        syms
+
+      [] ->
+        seed = Map.get(@qt_default_lists, name, [])
+        :ets.insert(:dow_jones, {qt_key(user_id, name), seed})
+        seed
+    end
+  end
+
+  defp put_list(user_id, name, syms) do
+    :ets.insert(:dow_jones, {qt_key(user_id, name), syms})
+  end
+
+  defp delete_symbol(user_id, ticker) do
+    @qt_list_names
+    |> Enum.each(fn name ->
+      syms = get_list(user_id, name)
+      kept = Enum.reject(syms, fn {_t, s} -> s == ticker end)
+      if kept != syms, do: put_list(user_id, name, kept)
+    end)
+  end
+
+  # 6-byte symbol records: type(1) + ticker(5, space-padded). Trim to {type, tick}.
+  defp parse_symbols(blob) do
+    for <<chunk::binary-size(6) <- blob>> do
+      <<type::binary-size(1), tick::binary-size(5)>> = chunk
+      {type, String.trim(tick)}
+    end
+    |> Enum.reject(fn {_t, s} -> s == "" end)
+  end
+
+  # '02' maint load-one response (one named list, with resolved names):
+  #   status(1)='0' | reserved(6) | flag(1)='0' | count(2, ASCII) | per-symbol
+  #   [2-byte-binary len][type(1)][ticker(5, space-padded)][name]. BNB00002
+  #   proc_1 reads flag@8, count@9-10, entries@11. Names aren't persisted by the
+  #   '03' save (type+ticker only), so the server resolves each here.
+  defp hi500010_loadone_payload(user_id, listname) do
+    syms = get_list(user_id, listname)
+
+    entries =
+      for {t, s} <- syms, into: "" do
+        name = qt_short_name(s)
+        content = t <> String.pad_trailing(String.slice(s, 0, 5), 5) <> name
+        <<byte_size(content)::16>> <> content
+      end
+
+    count = syms |> length() |> Integer.to_string() |> String.pad_leading(2, "0")
+    "0" <> String.duplicate(" ", 6) <> "0" <> count <> entries
+  end
+
+  # Display name for a ticker: ETS name cache, else decode_quote, else the ticker.
+  defp qt_short_name(ticker) do
+    case :ets.lookup(:dow_jones, ticker) do
+      [{_, name}] ->
+        name
+
+      [] ->
+        try do
+          (decode_quote(ticker).shortName || ticker) |> to_string() |> String.upcase()
+        rescue
+          _ -> ticker
+        end
+    end
+  end
+
+  # '01' load response: status + reserved + count + one entry per list.
+  defp hi500010_load_payload(user_id) do
+    lists = for name <- @qt_list_names, do: {name, get_list(user_id, name)}
+
+    entries =
+      for {name, syms} <- lists, into: "" do
+        sym_bin =
+          for {t, s} <- syms, into: "", do: t <> String.pad_trailing(String.slice(s, 0, 5), 5)
+
+        content =
+          String.pad_leading(Integer.to_string(byte_size(name)), 2, "0") <> name <> sym_bin
+
+        <<byte_size(content)::16>> <> content
+      end
+
+    count = lists |> length() |> Integer.to_string() |> String.pad_leading(2, "0")
+    "0" <> String.duplicate(" ", 6) <> count <> entries
   end
 
   # Shared FM64 error reply for a failed quote lookup.
