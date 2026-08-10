@@ -456,26 +456,35 @@ defmodule Prodigy.Server.Service.DowJones do
         %Fm0{dest: 0x040210, payload: <<"HI600010", rest::binary>>} = request,
         %Context{} = context
       ) do
-    <<_desc::binary-size(5), _mode::binary-size(1), _offset::binary-size(4),
-      _len::binary-size(2), symbol::binary-size(5)>> = rest
+    # Parse from both ends so the offset field's byte width doesn't matter (the
+    # client builds it via MOVE ABS, whose width varies): symbol is the last 5
+    # bytes, the 0x0005 length the 2 before, offset is whatever remains.
+    <<_desc::binary-size(5), mode::binary-size(1), middle::binary>> = rest
+    msize = byte_size(middle)
+    symbol = binary_part(middle, msize - 5, 5)
+    offset = middle |> binary_part(0, max(msize - 7, 0)) |> :binary.decode_unsigned()
     sym = String.trim(symbol)
-    Logger.info("dow_jones HI600010 company news (MOCK) sym=#{inspect(sym)}")
+    Logger.info("dow_jones HI600010 company news (MOCK) sym=#{inspect(sym)} " <>
+      "mode=#{inspect(mode)} offset=#{offset}")
 
     {name, stories} = news_for(sym)
-    # Story count is read by ZDJO0005 via DIVIDE (string->number), so it must be
-    # ASCII digits, NOT binary. V (@6-7) is read via MOVE ABS, so it stays binary.
-    count = stories |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
-    storydata = Enum.join(stories, "\r")
-    v = byte_size(name) + 9
+    # Paginate: 3 headlines per screen from `offset` (a story index we echo back
+    # as the next offset). First page (mode 'X') carries the name + total count;
+    # continuations carry just status | next-offset | storydata.
+    page = Enum.slice(stories, offset, 3)
+    next_offset = offset + length(page)
+    storydata = Enum.join(page, "\r")
 
     payload =
-      "0" <>
-        <<0::32>> <>
-        <<v::16>> <>
-        count <>
-        <<0::40>> <>
-        name <>
-        storydata
+      if mode == "X" do
+        # Story count read via DIVIDE (string->number) -> ASCII digits. V (@6-7)
+        # read via MOVE ABS -> binary.
+        count = stories |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
+        v = byte_size(name) + 9
+        "0" <> <<next_offset::32>> <> <<v::16>> <> count <> <<0::40>> <> name <> storydata
+      else
+        "0" <> <<next_offset::32>> <> storydata
+      end
 
     response = %{
       request
@@ -731,9 +740,21 @@ defmodule Prodigy.Server.Service.DowJones do
          "assembly plant that builds the Pontiac Firebird and Chevrolet Camaro.\n" <>
          "   The California facility was closed yesterday, putting about 3,500 " <>
          "employees out of work. It will reopen Monday.",
-       "08/16/90 GM Reports Higher Quarterly Earnings On Truck Demand\n" <>
+       "08/16/90 Sponsors Tough To Find In Ad Slowdown\n" <>
+         "   NEW YORK -- Advertisers pulled back this quarter, making sponsors " <>
+         "harder to find across broadcast and print, media buyers said.",
+       "08/16/90 GM's EDS Unit Signs Pact With Permian Corp.\n" <>
+         "   DALLAS -- Electronic Data Systems, the GM unit, said it signed a " <>
+         "multiyear information-services contract with Permian Corp.",
+       "08/15/90 GM Reports Higher Quarterly Earnings On Truck Demand\n" <>
          "   DETROIT -- General Motors Corp. posted improved quarterly results, " <>
-         "citing strong demand for light trucks and cost controls."
+         "citing strong demand for light trucks and cost controls.",
+       "08/15/90 GM Europe Unit Plans New Assembly Line\n" <>
+         "   RUESSELSHEIM -- Adam Opel AG outlined plans for a new assembly line " <>
+         "to meet demand for its compact models.",
+       "08/14/90 GM Board Reviews Capital Spending Plan\n" <>
+         "   DETROIT -- Directors met to review the auto maker's multiyear " <>
+         "capital-spending program, people familiar with the matter said."
      ]}
   end
 
