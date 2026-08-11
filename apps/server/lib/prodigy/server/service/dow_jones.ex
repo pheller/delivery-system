@@ -461,7 +461,7 @@ defmodule Prodigy.Server.Service.DowJones do
     # bytes, the 0x0005 length the 2 before, offset is whatever remains.
     <<_desc::binary-size(5), mode::binary-size(1), middle::binary>> = rest
     msize = byte_size(middle)
-    symbol = binary_part(middle, msize - 5, 5)
+    symbol = if msize >= 5, do: binary_part(middle, msize - 5, 5), else: ""
     offset = middle |> binary_part(0, max(msize - 7, 0)) |> :binary.decode_unsigned()
     sym = String.trim(symbol)
     Logger.info("dow_jones HI600010 company news (MOCK) sym=#{inspect(sym)} " <>
