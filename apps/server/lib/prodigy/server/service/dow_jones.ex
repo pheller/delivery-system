@@ -468,22 +468,33 @@ defmodule Prodigy.Server.Service.DowJones do
       "mode=#{inspect(mode)} offset=#{offset}")
 
     {name, stories} = news_for(sym)
-    # Paginate: 3 headlines per screen from `offset` (a story index we echo back
-    # as the next offset). First page (mode 'X') carries the name + total count;
-    # continuations carry just status | next-offset | storydata.
-    page = Enum.slice(stories, offset, 3)
-    next_offset = offset + length(page)
-    storydata = Enum.join(page, "\r")
 
     payload =
-      if mode == "X" do
-        # Story count read via DIVIDE (string->number) -> ASCII digits. V (@6-7)
-        # read via MOVE ABS -> binary.
-        count = stories |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
-        v = byte_size(name) + 9
-        "0" <> <<next_offset::32>> <> <<v::16>> <> count <> <<0::40>> <> name <> storydata
-      else
-        "0" <> <<next_offset::32>> <> storydata
+      cond do
+        mode == "A" ->
+          # Article fetch: full body of the story at `offset` (0-based). The
+          # article page (ZDJO0019) reads status(1) then the body.
+          body = Enum.at(stories, offset, "")
+          "0" <> body
+
+        true ->
+          # List fetch: 3 HEADLINES per screen from `offset` (a story index we
+          # echo back as the next offset). Only the first line (date + title) is
+          # sent so the list fits; the body is fetched on selection (mode 'A').
+          # First page (mode 'X') carries the name + total count; continuations
+          # carry just status | next-offset | headlines.
+          page = stories |> Enum.slice(offset, 3) |> Enum.map(&headline_of/1)
+          next_offset = offset + length(page)
+          storydata = Enum.join(page, "\r")
+
+          if mode == "X" do
+            # Count read via DIVIDE (string->number) -> ASCII; V via MOVE ABS -> binary.
+            count = stories |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
+            v = byte_size(name) + 9
+            "0" <> <<next_offset::32>> <> <<v::16>> <> count <> <<0::40>> <> name <> storydata
+          else
+            "0" <> <<next_offset::32>> <> storydata
+          end
       end
 
     response = %{
@@ -731,6 +742,9 @@ defmodule Prodigy.Server.Service.DowJones do
   # Company-news mock: {company name, [story, ...]}. Each story is a text blob
   # "MM/DD/YY headline\ntext..."; the synthesized ZDJO0004 renders the first
   # story into the article view. Empty list -> "no news stories" path.
+  # First line of a story ("MM/DD/YY title...") -- the headline for the list.
+  defp headline_of(story), do: story |> String.split("\n", parts: 2) |> hd()
+
   defp news_for("GM") do
     {"GENERAL MOTORS CORP",
      [
