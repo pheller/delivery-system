@@ -69,7 +69,7 @@ defmodule Prodigy.Server.Service.Sabre.SabreAirGqlClient do
     case response do
       {:ok, %Req.Response{status: 200, body: body}} ->
         try do
-          body |> Map.get("data") |> Map.get("flights") |> es_map()
+          body |> Map.get("data") |> Map.get("itineraries") |> es_map()
         rescue
           e ->
             Logger.warning("Failed to parse GraphQL response body: #{inspect(e)}")
@@ -87,94 +87,150 @@ defmodule Prodigy.Server.Service.Sabre.SabreAirGqlClient do
   end
 
   defp build_request(sabre_map) do
-    # Build the GraphQL request body from the sabre_map
-
-    fromDate_text = "fromDate: \"#{adjust_date(sabre_map.date)}\", "
-    toDate_text = "toDate: \"#{adjust_date(sabre_map.date)}\", "
+    # Query the itinerary assembler (nonstop + through + connection) so O&D pairs
+    # with no direct flight (e.g. SEA->BOS) still return results. The old
+    # nonstop-only `flights` query returned nothing for those.
     origin_text = "origin: \"#{sabre_map.departure}\", "
     dest_text = "dest: \"#{sabre_map.arrival}\", "
+    date_text = "date: \"#{sabre_map.date}\", "
 
-    carrier_text =
-      if Map.has_key?(sabre_map, :carrier) and sabre_map.carrier != nil do
-        "carrier: \"#{sabre_map.carrier}\", "
+    # Honor a requested "no earlier than" departure time when the user gave one.
+    after_text =
+      if Map.has_key?(sabre_map, :time) and sabre_map.time != nil do
+        "departureAfter: \"#{sabre_map.time}\", "
       else
         ""
       end
 
-    # If there's a flight number, use it directly else there should be a departure time to use
-    f_or_d_text =
-      cond do
-        Map.has_key?(sabre_map, :flight_number) and sabre_map.flight_number != nil ->
-          "flightNumber: \"#{sabre_map.flight_number}\", "
-
-        Map.has_key?(sabre_map, :time) and sabre_map.time != nil ->
-          "departureTime: \"#{sabre_map.time}\", "
-
-        true ->
-          ""
-      end
-
+    # Fetch several pages' worth of itineraries so the NEXT function has results
+    # to page through (the results page shows ~3-6 per page depending on how many
+    # are two-row connections). The renderer/eaasy_sabre pages through this set.
     """
     query {
-      flights(
-        #{fromDate_text}
-        #{toDate_text}
+      itineraries(
         #{origin_text}
         #{dest_text}
-        #{carrier_text}
-        #{f_or_d_text}
-        limit: #{EaasySabre.max_flights()}) {
-          id
-          flightNumber
-          date
+        #{date_text}
+        #{after_text}
+        limit: #{EaasySabre.max_flights() * 8}) {
+          kind
+          stops
           origin
           dest
-          carrier
-          arrivalTime
+          date
           departureTime
-          airline {
-            name
+          arrivalTime
+          legs {
+            carrier
+            flightNumber
+            origin
+            dest
+            equip
+            departureTime
+            arrivalTime
+          }
+          availability {
+            class
+            seats
+          }
+          fares {
+            class
+            fare
           }
       }
     }
     """
   end
 
-  defp adjust_date(date_text) do
-    date = Date.from_iso8601!(date_text)
-    year_shift = 2013 - date.year
-    Date.shift(date, year: year_shift) |> Date.to_string()
-  end
-
-  # Converts a list of flight maps from the GraphQL response into the format expected by eaasy_sabre module.
-  defp es_map(flights) when is_list(flights) do
-    Enum.map(flights, fn flight ->
-      es_one_flight_map(flight)
-    end)
+  # Converts the itineraries GraphQL response into the flight-row maps the
+  # eaasy_sabre renderer expects.
+  defp es_map(itineraries) when is_list(itineraries) do
+    itineraries
+    |> Enum.map(&es_one_itin_map/1)
     |> Enum.with_index()
-    |> Enum.map(fn {flight, idx} -> Map.put(flight, :index, idx) end)
+    |> Enum.map(fn {itin, idx} -> Map.put(itin, :index, idx) end)
   end
 
-  defp es_one_flight_map(flight) do
-    departure_text = Time.from_iso8601!(Map.get(flight, "departureTime")) |> SabreAirMapper.time_to_sabre()
-    arrival_text = Time.from_iso8601!(Map.get(flight, "arrivalTime")) |> SabreAirMapper.time_to_sabre()
-    padded_flight_number = String.pad_leading(Map.get(flight, "flightNumber"), 4, " ")
+  @all_classes ["F", "Y", "B", "M", "H", "Q", "V", "K"]
 
-    header_date = Date.from_iso8601!(Map.get(flight, "date"))
+  defp es_one_itin_map(itin) do
+    legs = Map.get(itin, "legs", [])
+    first = List.first(legs) || %{}
+    kind = Map.get(itin, "kind")
+
+    itin_depart = Time.from_iso8601!(Map.get(itin, "departureTime")) |> SabreAirMapper.time_to_sabre()
+    itin_arrive = Time.from_iso8601!(Map.get(itin, "arrivalTime")) |> SabreAirMapper.time_to_sabre()
+
+    header_date = Date.from_iso8601!(Map.get(itin, "date"))
     formatted_date = Calendar.strftime(header_date, "%3b %02d %02y") |> String.upcase()
 
+    # Only offer booking classes that have seats; fall back to the full set when
+    # the pseudo-inventory shows this itinerary sold out.
+    available =
+      itin
+      |> Map.get("availability", [])
+      |> Enum.filter(fn a -> (a["seats"] || 0) > 0 end)
+      |> Enum.map(& &1["class"])
+
+    booking_classes = if available == [], do: @all_classes, else: available
+
+    # Display rows: a connection (change of planes) shows one row per segment; a
+    # nonstop or a same-flight-number through service shows a single row (with the
+    # stop count). The renderer puts the selection chevron on the first row only.
+    rows =
+      case kind do
+        "connection" -> Enum.map(legs, &seg_row/1)
+        _ -> [collapsed_row(itin, first, itin_depart, itin_arrive)]
+      end
+
     %{
-      flight: flight["carrier"] <> " " <> padded_flight_number,
-      origin: flight["origin"],
-      depart: departure_text,
-      dest: flight["dest"],
-      arrive: arrival_text,
+      # Top-level fields describe the whole itinerary (used by the booking pages).
+      flight: seg_label(first),
+      origin: Map.get(itin, "origin"),
+      depart: itin_depart,
+      dest: Map.get(itin, "dest"),
+      arrive: itin_arrive,
       formatted_date: formatted_date,
-      # Dummy values for required fields not provided by GraphQL API
-      stops: 0,
-      equip: "D10",
+      stops: Map.get(itin, "stops", 0),
+      equip: Map.get(first, "equip") || "D9S",
       meal: "8",
-      booking_classes: ["F", "Y", "B", "M", "H", "Q", "V", "K"]
+      booking_classes: booking_classes,
+      kind: kind,
+      segments: legs,
+      rows: rows
+    }
+  end
+
+  # "AA" + "108" -> "AA  108" (flight number right-justified to 4).
+  defp seg_label(leg),
+    do: Map.get(leg, "carrier", "") <> " " <> String.pad_leading(Map.get(leg, "flightNumber", ""), 4, " ")
+
+  # One display row for a single flown segment (always shown as nonstop).
+  defp seg_row(leg) do
+    %{
+      flight: seg_label(leg),
+      origin: leg["origin"],
+      depart: Time.from_iso8601!(leg["departureTime"]) |> SabreAirMapper.time_to_sabre(),
+      dest: leg["dest"],
+      arrive: Time.from_iso8601!(leg["arrivalTime"]) |> SabreAirMapper.time_to_sabre(),
+      stops: 0,
+      equip: leg["equip"] || "D9S",
+      meal: "8"
+    }
+  end
+
+  # One collapsed row for a nonstop or same-flight-number through itinerary: the
+  # single flight number over the whole O&D, carrying the itinerary's stop count.
+  defp collapsed_row(itin, first, depart, arrive) do
+    %{
+      flight: seg_label(first),
+      origin: Map.get(itin, "origin"),
+      depart: depart,
+      dest: Map.get(itin, "dest"),
+      arrive: arrive,
+      stops: Map.get(itin, "stops", 0),
+      equip: Map.get(first, "equip") || "D9S",
+      meal: "8"
     }
   end
 end

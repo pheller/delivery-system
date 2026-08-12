@@ -370,23 +370,42 @@ defmodule Prodigy.Server.Service.Sabre.Test do
   # SabreAirGqlClient
   # ===========================================================================
 
-  @gql_flight %{
+  @gql_leg %{
     "carrier" => "AA",
     "flightNumber" => "1261",
     "origin" => "JFK",
     "dest" => "LAX",
+    "equip" => "D10",
+    "departureTime" => "18:00:00",
+    "arrivalTime" => "23:03:00"
+  }
+
+  @gql_itinerary %{
+    "kind" => "nonstop",
+    "stops" => 0,
+    "origin" => "JFK",
+    "dest" => "LAX",
+    "date" => "1989-10-01",
     "departureTime" => "18:00:00",
     "arrivalTime" => "23:03:00",
-    "date" => "2013-10-01",
-    "id" => "1",
-    "airline" => %{"name" => "American Airlines"}
+    "legs" => [@gql_leg],
+    "availability" => [
+      %{"class" => "F", "seats" => 2},
+      %{"class" => "Y", "seats" => 5},
+      %{"class" => "K", "seats" => 0}
+    ],
+    "fares" => [
+      %{"class" => "F", "fare" => 1043},
+      %{"class" => "Y", "fare" => 417}
+    ]
   }
 
   describe "SabreAirGqlClient.handle_request/1" do
     test "returns a list of flight maps on a 200 response" do
       with_mock Req,
         post: fn _url, _opts ->
-          {:ok, %Req.Response{status: 200, body: %{"data" => %{"flights" => [@gql_flight]}}}}
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
         result = SabreAirGqlClient.handle_request(request)
@@ -397,7 +416,8 @@ defmodule Prodigy.Server.Service.Sabre.Test do
     test "maps carrier and flight number into the :flight field" do
       with_mock Req,
         post: fn _url, _opts ->
-          {:ok, %Req.Response{status: 200, body: %{"data" => %{"flights" => [@gql_flight]}}}}
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
         [flight | _] = SabreAirGqlClient.handle_request(request)
@@ -408,7 +428,8 @@ defmodule Prodigy.Server.Service.Sabre.Test do
     test "converts departure and arrival times to Sabre format" do
       with_mock Req,
         post: fn _url, _opts ->
-          {:ok, %Req.Response{status: 200, body: %{"data" => %{"flights" => [@gql_flight]}}}}
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
         [flight | _] = SabreAirGqlClient.handle_request(request)
@@ -420,7 +441,8 @@ defmodule Prodigy.Server.Service.Sabre.Test do
     test "maps origin and destination airport codes" do
       with_mock Req,
         post: fn _url, _opts ->
-          {:ok, %Req.Response{status: 200, body: %{"data" => %{"flights" => [@gql_flight]}}}}
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
         [flight | _] = SabreAirGqlClient.handle_request(request)
@@ -432,23 +454,37 @@ defmodule Prodigy.Server.Service.Sabre.Test do
     test "formats the flight date for terminal display" do
       with_mock Req,
         post: fn _url, _opts ->
-          {:ok, %Req.Response{status: 200, body: %{"data" => %{"flights" => [@gql_flight]}}}}
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
         [flight | _] = SabreAirGqlClient.handle_request(request)
-        assert flight.formatted_date == "OCT 01 13"
+        assert flight.formatted_date == "OCT 01 89"
       end
     end
 
-    test "assigns an index to each returned flight" do
-      second_flight = Map.merge(@gql_flight, %{"flightNumber" => "456", "carrier" => "UA"})
+    test "offers only booking classes with seats available" do
+      with_mock Req,
+        post: fn _url, _opts ->
+          {:ok,
+           %Req.Response{status: 200, body: %{"data" => %{"itineraries" => [@gql_itinerary]}}}}
+        end do
+        request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}
+        [flight | _] = SabreAirGqlClient.handle_request(request)
+        assert flight.booking_classes == ["F", "Y"]
+      end
+    end
+
+    test "assigns an index to each returned itinerary" do
+      second_leg = Map.merge(@gql_leg, %{"flightNumber" => "456", "carrier" => "UA"})
+      second_itin = Map.put(@gql_itinerary, "legs", [second_leg])
 
       with_mock Req,
         post: fn _url, _opts ->
           {:ok,
            %Req.Response{
              status: 200,
-             body: %{"data" => %{"flights" => [@gql_flight, second_flight]}}
+             body: %{"data" => %{"itineraries" => [@gql_itinerary, second_itin]}}
            }}
         end do
         request = %{type: :airline, departure: "JFK", arrival: "LAX", date: "2026-10-01"}

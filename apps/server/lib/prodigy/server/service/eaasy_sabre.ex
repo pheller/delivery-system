@@ -88,6 +88,8 @@ defmodule Prodigy.Server.Service.EaasySabre do
       current_page: nil,
       signed_in: false,
       search_results: nil,
+      results_offset: 0,      # Index of the first itinerary shown on the results page (for NEXT paging)
+      results_date: nil,      # Cached date-display string for re-rendering paged results
       selected_flights: [],
       current_flight: nil,  # Flight currently being booked (for booking class selection)
       profile_selected: false,  # Whether travel profile has been selected (only shown once)
@@ -113,7 +115,7 @@ defmodule Prodigy.Server.Service.EaasySabre do
 
   # Reset transient state (search results, selections, itinerary)
   defp reset_transient(state) do
-    %{state | search_results: nil, selected_flights: [], current_flight: nil, profile_selected: false, itinerary: nil}
+    %{state | search_results: nil, results_offset: 0, results_date: nil, selected_flights: [], current_flight: nil, profile_selected: false, itinerary: nil}
   end
 
   # Format flight info for the booking code selection page.
@@ -423,60 +425,113 @@ defmodule Prodigy.Server.Service.EaasySabre do
     |> String.trim_trailing()
   end
 
-  # Build flight results page response
+  # Slice the itineraries for one results page starting at `offset`, greedily
+  # filling up to `max_lines` display lines (a nonstop/through is 1 line, a
+  # connection is 2). Always includes at least one itinerary so NEXT advances.
+  defp page_of(results, offset, max_lines) do
+    results
+    |> Enum.drop(offset)
+    |> Enum.reduce_while({[], 0}, fn itin, {acc, used} ->
+      n = length(Map.get(itin, :rows, [itin]))
+
+      cond do
+        acc == [] -> {:cont, {[itin], n}}
+        used + n <= max_lines -> {:cont, {[itin | acc], used + n}}
+        true -> {:halt, {acc, used}}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  # Render the results page at a given itinerary offset, recording the offset in
+  # state so NEXT/first paging and flight selection know where they are.
+  defp render_results_page(state, offset) do
+    results = state.search_results || []
+    page = page_of(results, offset, @max_flights)
+    response = build_flight_results_response(page, state.results_date)
+    {response, %{state | current_page: @page_flight_results, results_offset: offset}}
+  end
+
+  # Positional field IDs, one per display line (line 0..5).
+  @result_selection_field_ids [0x7527, 0xD927, 0x3D28, 0xA128, 0x0529, 0x6929]
+  @result_code_field_ids [0xE2, 0x38, 0x42, 0x4C, 0x56, 0x60]
+  @result_class_field_ids [0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
+
+  # Build flight results page response.
+  #
+  # Each itinerary expands into one display line per row: a nonstop or same-flight
+  # through service is a single row; a change-of-planes connection is two rows (one
+  # per segment). The selection chevron (and the booking classes) sit on the FIRST
+  # row of each itinerary only; a connection's second row is just another line.
   defp build_flight_results_response(search_results, date_display) do
-    # Build flight display rows (fields 0x10, 0x11, etc.)
-    flight_rows = search_results
-    |> Enum.with_index()
-    |> Enum.map(fn {flight, idx} ->
-      field_id = 0x10 + idx
-      row = format_flight_result_row(flight)
-      <<field_id, 0x27, 0, 39, row::binary>>
-    end)
-    |> Enum.join()
+    lines =
+      search_results
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {itin, sel_num} ->
+        rows = Map.get(itin, :rows, [itin])
+        classes = format_booking_classes(itin.booking_classes)
 
-    # Build selection number fields (0x75, 0xD9, etc.)
-    selection_field_ids = [0x7527, 0xD927, 0x3D28, 0xA128, 0x0529, 0x6929]  # Up to 6 flights
-    selection_fields = search_results
-    |> Enum.with_index(1)
-    |> Enum.map(fn {_flight, num} ->
-      field_id = Enum.at(selection_field_ids, num - 1)
-      num_str = Integer.to_string(num)
-      <<field_id::16-big, 0x00, byte_size(num_str), num_str::binary>>
-    end)
-    |> Enum.join()
+        rows
+        |> Enum.with_index()
+        |> Enum.map(fn {row, ri} ->
+          %{
+            row: format_flight_result_row(row),
+            code: row.flight,
+            selection: if(ri == 0, do: Integer.to_string(sel_num), else: nil),
+            classes: if(ri == 0, do: classes, else: nil)
+          }
+        end)
+      end)
+      # The page has a fixed number of display lines; the rest fall to "next".
+      |> Enum.take(@max_flights)
 
-    # Build flight code display fields (0xE2, 0x38, etc.)
-    code_field_ids = [0xE2, 0x38, 0x42, 0x4C, 0x56, 0x60]  # Up to 6 flights
-    code_fields = search_results
-    |> Enum.with_index()
-    |> Enum.map(fn {flight, idx} ->
-      field_id = Enum.at(code_field_ids, idx)
-      code = flight.flight
-      <<field_id, 0x27, 0, byte_size(code), code::binary>>
-    end)
-    |> Enum.join()
+    indexed = Enum.with_index(lines)
 
-    # Build booking class display fields (0x6A, 0x6B, etc.)
-    class_field_ids = [0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]  # Up to 6 flights
-    class_fields = search_results
-    |> Enum.with_index()
-    |> Enum.map(fn {flight, idx} ->
-      field_id = Enum.at(class_field_ids, idx)
-      classes = format_booking_classes(flight.booking_classes)
-      <<field_id, 0x27, 0, byte_size(classes), classes::binary>>
-    end)
-    |> Enum.join()
+    row_fields =
+      indexed
+      |> Enum.map(fn {l, i} -> <<0x10 + i, 0x27, 0, 39, l.row::binary>> end)
+      |> Enum.join()
 
-    # Total field count: 1 (date) + flights * 4 (row, selection, code, classes)
-    field_count = 1 + length(search_results) * 4
+    selection_fields =
+      indexed
+      |> Enum.flat_map(fn {l, i} ->
+        case l.selection do
+          nil -> []
+          s -> [<<Enum.at(@result_selection_field_ids, i)::16-big, 0x00, byte_size(s), s::binary>>]
+        end
+      end)
+      |> Enum.join()
+
+    code_fields =
+      indexed
+      |> Enum.map(fn {l, i} ->
+        <<Enum.at(@result_code_field_ids, i), 0x27, 0, byte_size(l.code), l.code::binary>>
+      end)
+      |> Enum.join()
+
+    class_fields =
+      indexed
+      |> Enum.flat_map(fn {l, i} ->
+        case l.classes do
+          nil -> []
+          c -> [<<Enum.at(@result_class_field_ids, i), 0x27, 0, byte_size(c), c::binary>>]
+        end
+      end)
+      |> Enum.join()
+
+    n_lines = length(lines)
+    n_sel = Enum.count(lines, & &1.selection)
+
+    # date(1) + row per line + selection per itinerary + code per line + classes per itinerary
+    field_count = 1 + n_lines + n_sel + n_lines + n_sel
 
     <<
       7, 0, 0x01,
       @page_flight_results::16-big,
       field_count, 0,
       0x24, 0x27, 0, byte_size(date_display), date_display::binary,
-      flight_rows::binary,
+      row_fields::binary,
       selection_fields::binary,
       code_fields::binary,
       class_fields::binary
@@ -534,14 +589,9 @@ defmodule Prodigy.Server.Service.EaasySabre do
         SabreAirMapper.mapper_date_format(client_map[:date])
     end
 
-    new_state = %{state |
-      current_page: @page_flight_results,
-      search_results: search_results
-    }
-
-    response = build_flight_results_response(search_results, date_display)
-
-    {response, new_state}
+    # Fresh search: reset to the first page and render.
+    %{state | search_results: search_results, results_date: date_display}
+    |> render_results_page(0)
   end
 
   defp int_handle("/RULES" <> _rest, state) do
@@ -582,13 +632,38 @@ defmodule Prodigy.Server.Service.EaasySabre do
   # Special handlers (non-simple navigation)
   # ============================================================================
 
+  # Flight results paging. The client's NEXT function sends "10" (more) and its
+  # first-page function sends "8" (Prodigy swaps the normal Eaasy Sabre codes,
+  # where 8=more/10=first); see tbol TQPXINIT/TQPXPARM. These are handled before
+  # numeric flight selection - selectable line numbers are only 1..6, so "10" and
+  # "8" never collide with a selection.
+  defp int_handle("10", %{current_page: @page_flight_results, search_results: results} = state)
+       when results != nil do
+    offset = Map.get(state, :results_offset, 0)
+    consumed = length(page_of(results, offset, @max_flights))
+    next_offset = offset + consumed
+
+    # Advance only if there's another page; otherwise stay on the last page.
+    new_offset = if next_offset < length(results), do: next_offset, else: offset
+    Logger.info("Eaasy Sabre: results NEXT page -> offset #{new_offset}")
+    render_results_page(state, new_offset)
+  end
+
+  defp int_handle("8", %{current_page: @page_flight_results, search_results: results} = state)
+       when results != nil do
+    Logger.info("Eaasy Sabre: results FIRST page")
+    render_results_page(state, 0)
+  end
+
   # Flight results - numeric selection picks a flight
   defp int_handle(selection, %{current_page: @page_flight_results, search_results: results} = state)
        when results != nil do
     Logger.debug("Eaasy Sabre: int_handle Flight Results selection #{inspect(selection)}")
+    offset = Map.get(state, :results_offset, 0)
+
     case Integer.parse(selection) do
       {index, ""} when index >= 1 ->
-        case Enum.at(results, index - 1) do
+        case Enum.at(results, offset + index - 1) do
           nil ->
             Logger.warning("Eaasy Sabre: Invalid flight selection #{index}")
             {<<0>>, state}
@@ -693,8 +768,6 @@ defmodule Prodigy.Server.Service.EaasySabre do
     client_module = Application.get_env(:server, :sabre_air_client)
     search_results = client_module.handle_request(client_map)
 
-    new_state = %{state | current_page: @page_flight_results, search_results: search_results}
-
     # each flight in search_results should have a formatted_date field
     # If no flights returned, use the search date for display (formatted as "OCT 01 91")
     date_display = cond do
@@ -704,9 +777,9 @@ defmodule Prodigy.Server.Service.EaasySabre do
         SabreAirMapper.mapper_date_format(client_map[:date])
     end
 
-    response = build_flight_results_response(search_results, date_display)
-
-    {response, new_state}
+    # Fresh (return-leg) search: reset to the first page and render.
+    %{state | search_results: search_results, results_date: date_display}
+    |> render_results_page(0)
   end
 
   # Travel profile selection - "1" uses regular travel profile
