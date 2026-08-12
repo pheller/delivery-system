@@ -472,10 +472,23 @@ defmodule Prodigy.Server.Service.DowJones do
     payload =
       cond do
         mode == "A" ->
-          # Article fetch: full body of the story at `offset` (0-based). The
-          # article page (ZDJO0019) reads status(1) then the body.
-          body = Enum.at(stories, offset, "")
-          "0" <> body
+          # Article fetch, ONE screen at a time. The offset packs the story index
+          # (high) and the 1-based screen number (low): offset = story*256+screen.
+          # The story is wrapped + space-padded to the 40-col grid, split into
+          # 440-char (11-row) screens (last padded to 440). Response:
+          #   '0' | total_screens (2-char ASCII) | this screen's 440 chars.
+          story_index = div(offset, 256)
+          screen = rem(offset, 256)
+          full = stories |> Enum.at(story_index, "") |> wrap_story()
+
+          screen_size = 40 * 11
+          total = max(1, div(byte_size(full) + screen_size - 1, screen_size))
+          padded = String.pad_trailing(full, total * screen_size)
+          s = screen |> max(1) |> min(total)
+          page_text = binary_part(padded, (s - 1) * screen_size, screen_size)
+          total_str = total |> Integer.to_string() |> String.pad_leading(2, "0")
+
+          "0" <> total_str <> page_text
 
         true ->
           # List fetch: 3 HEADLINES per screen from `offset` (a story index we
@@ -745,6 +758,58 @@ defmodule Prodigy.Server.Service.DowJones do
   # First line of a story ("MM/DD/YY title...") -- the headline for the list.
   defp headline_of(story), do: story |> String.split("\n", parts: 2) |> hd()
 
+  # Pre-wrap a story into the article field's 40-column grid, matching the
+  # hand-made cn.td reference: the "DATE TITLE" headline block gets a 1-space
+  # indent on every line; each body paragraph (paragraphs are the story's \n
+  # segments after the headline) gets a 2-space first-line indent, 0 hanging.
+  # Lines are joined with 0x0A (hard breaks the client renders verbatim).
+  # The article field is 40 columns. Each wrapped line is right-padded to exactly
+  # 40 chars and the lines are concatenated with NO 0x0A: the client's column cap
+  # then breaks each padded row cleanly onto its own line (no stray blank rows,
+  # no reliance on a 41st cell). ZDJO0019 clears SYS_WORD_WRAP so the padding
+  # survives verbatim.
+  @row_width 40
+  defp wrap_story(""), do: ""
+
+  defp wrap_story(story) do
+    case String.split(story, "\n") do
+      [headline | paras] ->
+        head = wrap_para(headline, " ", " ")
+        body = Enum.flat_map(paras, fn p -> wrap_para(p, "  ", "") end)
+
+        (head ++ body)
+        |> Enum.map(&String.pad_trailing(&1, @row_width))
+        |> Enum.join()
+
+      [] ->
+        ""
+    end
+  end
+
+  # Greedy word-wrap `text` to <= @row_width cols; the first line carries
+  # `first_prefix`, continuation lines carry `cont_prefix`. Returns a list of
+  # lines (each <= @row_width; the caller right-pads to @row_width).
+  defp wrap_para(text, first_prefix, cont_prefix) do
+    words = text |> String.split(~r/\s+/, trim: true)
+
+    {lines, cur} =
+      Enum.reduce(words, {[], nil}, fn word, {lines, cur} ->
+        cond do
+          cur == nil ->
+            {lines, first_prefix <> word}
+
+          String.length(cur) + 1 + String.length(word) <= @row_width ->
+            {lines, cur <> " " <> word}
+
+          true ->
+            {[cur | lines], cont_prefix <> word}
+        end
+      end)
+
+    lines = if cur, do: [cur | lines], else: lines
+    Enum.reverse(lines)
+  end
+
   defp news_for("GM") do
     {"GENERAL MOTORS CORP",
      [
@@ -769,6 +834,38 @@ defmodule Prodigy.Server.Service.DowJones do
        "08/14/90 GM Board Reviews Capital Spending Plan\n" <>
          "   DETROIT -- Directors met to review the auto maker's multiyear " <>
          "capital-spending program, people familiar with the matter said."
+     ]}
+  end
+
+  # Deliberately long single story (~5 screens) to exercise article pagination.
+  defp news_for("IBM") do
+    {"INTL BUSINESS MACHINES",
+     [
+       "08/17/90 IBM Outlines Multiyear Plan To Reshape Its Mainframe Business\n" <>
+         "   ARMONK -- International Business Machines Corp. detailed a sweeping " <>
+         "multiyear plan to reshape its mainframe business, telling analysts it " <>
+         "would invest heavily in new processor lines while trimming costs across " <>
+         "its manufacturing operations over the next several quarters.\n" <>
+         "   PARAGRAPH TWO. The company said demand for its largest systems " <>
+         "remained uneven as corporate customers stretched out purchasing cycles " <>
+         "and weighed smaller, cheaper machines that increasingly rivaled the " <>
+         "performance of traditional mainframes at a fraction of the price.\n" <>
+         "   PARAGRAPH THREE. Executives told the meeting that software and " <>
+         "services would take on a larger role in the company's revenue mix, and " <>
+         "that the sales force would be retrained to sell complete solutions " <>
+         "rather than individual boxes to its largest accounts.\n" <>
+         "   PARAGRAPH FOUR. Analysts pressed management on margins, noting that " <>
+         "aggressive pricing from competitors had squeezed profitability in the " <>
+         "midrange, where newer entrants had gained share quarter after quarter " <>
+         "throughout the year despite the company's established base.\n" <>
+         "   PARAGRAPH FIVE. The company reaffirmed its commitment to research " <>
+         "spending, saying laboratories in New York and California would continue " <>
+         "work on advanced storage, parallel processing and the networking " <>
+         "technologies it expects to anchor the next decade of products.\n" <>
+         "   PARAGRAPH SIX. Management closed the session by reiterating its " <>
+         "outlook for the second half, cautioning that currency swings and a " <>
+         "softening in Europe could weigh on results even as the domestic order " <>
+         "book showed early, tentative signs of stabilizing."
      ]}
   end
 
