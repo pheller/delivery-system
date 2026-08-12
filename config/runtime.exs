@@ -23,6 +23,13 @@ if System.get_env("RELEASE_MODE") do
     hostname: System.fetch_env!("DB_HOST"),
     show_sensitive_data_on_connection_error: true
 
+  # Eaasy Sabre reaches the flight-info GraphQL sidecar (eaasy_server)
+  # running alongside us in docker-compose. Default is the compose service
+  # name; override with SABRE_GRAPHQL_URL. Mirrors the DowJones sidecar pattern.
+  config :server,
+    sabre_graphql_url:
+      System.get_env("SABRE_GRAPHQL_URL") || "http://eaasy_server:4000/api/graphql"
+
   # URL_SCHEME / URL_PORT default to the prod values (https/443 behind a
   # CF Tunnel that terminates TLS). Method-c dev sets them to http/80 in
   # docker-compose.override.yaml so signup/OAuth-callback emails generated
