@@ -101,16 +101,19 @@ defmodule Prodigy.Server.Service.BulletinBoards.Test do
     response
   end
 
-  defp start_note_cursor(context, month, day, min, hour, topic_id) do
+  # Wire order after the flag byte is mmddHHMM (hour before minute).
+  # Flag 0x24 = exclude older bulletins with newer replies (07/89 client),
+  # 0x04 = include them (03/89 client, which always sends 0x04).
+  defp start_note_cursor(context, month, day, hour, min, topic_id, flag \\ 0x24) do
     {:ok, response} = Router.handle_packet(context.router_pid, %Fm0{
       src: 0x0,
       dest: 0x00D200,
       logon_seq: 0,
       message_id: 0,
       function: Fm0.Function.APPL_0,
-      payload: <<0x03, 0x00, 0x00, 0x67, 0x24,
+      payload: <<0x03, 0x00, 0x00, 0x67, flag,
         month::binary-size(2), day::binary-size(2),
-        min::binary-size(2), hour::binary-size(2),
+        hour::binary-size(2), min::binary-size(2),
         topic_id::16-big>>
     })
     response
@@ -286,6 +289,83 @@ defmodule Prodigy.Server.Service.BulletinBoards.Test do
     assert reply.in_reply_to == original.id
     assert reply.subject == "Re: Original Post"
     assert reply.body == "This is a reply."
+
+    logoff(context.router_pid)
+  end
+
+  test "start note cursor accepts include-replies flag 0x04 (03/89 client)", context do
+    logon(context.router_pid, "AAAA12A", "foobaz", "06.03.17")
+
+    enter_club(context, "TST")
+
+    submit_public_note(context, context.topic1.id, "       ",
+      "Original Post", "This is the original post.")
+
+    # The 03/17/89 GBRA0276 client always sends flag 0x04; it must reach
+    # the start-note-cursor handler, not fall through to unknown (status 0).
+    # Hour/minute exercise the mmddHHMM wire order (noon-oh-one default).
+    response = start_note_cursor(context, "01", "01", "12", "01", context.topic1.id, 0x04)
+    <<_dia_header::binary-size(16),
+      0x01,
+      _unknown::8,
+      _unknown2::32-big,
+      total::16-big,
+      _rest::binary>> = response
+    assert total == 1
+
+    logoff(context.router_pid)
+  end
+
+  test "exclude flag 0x24 omits older bulletins whose only newer activity is replies", context do
+    logon(context.router_pid, "AAAA12A", "foobaz", "06.03.17")
+
+    enter_club(context, "TST")
+
+    submit_public_note(context, context.topic1.id, "       ",
+      "Old Post", "Posted before the threshold.")
+
+    # Reply submission resolves in_reply_to through the note cursor
+    start_note_cursor(context, "01", "01", "00", "00", context.topic1.id)
+    submit_reply(context, context.topic1.id, 1, "       ",
+      "Re: Old Post", "Reply after the threshold.")
+
+    # Pin the bulletin before and the reply after a Jan 2 threshold
+    year = Date.utc_today().year
+    old_date = DateTime.from_naive!(NaiveDateTime.new!(year, 1, 1, 1, 0, 0), "Etc/UTC")
+    reply_date = DateTime.from_naive!(NaiveDateTime.new!(year, 1, 3, 1, 0, 0), "Etc/UTC")
+
+    Post
+    |> Ecto.Query.where([p], p.subject == "Old Post")
+    |> Repo.update_all(set: [sent_date: old_date])
+
+    Post
+    |> Ecto.Query.where([p], p.subject == "Re: Old Post")
+    |> Repo.update_all(set: [sent_date: reply_date])
+
+    # Exclude (0x24): the bulletin predates the threshold, so no results
+    response = start_note_cursor(context, "01", "02", "00", "00", context.topic1.id, 0x24)
+    <<_::binary-size(16), 0x01, _::8, _::32-big, total::16-big, _::binary>> = response
+    assert total == 0
+
+    # Include (0x04): the newer reply pulls the older bulletin in
+    response = start_note_cursor(context, "01", "02", "00", "00", context.topic1.id, 0x04)
+    <<_::binary-size(16), 0x01, _::8, _::32-big, total::16-big, _::binary>> = response
+    assert total == 1
+
+    logoff(context.router_pid)
+  end
+
+  test "start note cursor for an unknown topic returns an empty result", context do
+    logon(context.router_pid, "AAAA12A", "foobaz", "06.03.17")
+
+    enter_club(context, "TST")
+
+    # Malformed by construction - the client only sends topic ids it was
+    # given.  Expect the same well-formed response as a topic with no
+    # matching bulletins, which the client renders as "no results".
+    response = start_note_cursor(context, "01", "01", "00", "00", 9999)
+    <<_::binary-size(16), 0x01, _::8, _::32-big, total::16-big, _::binary>> = response
+    assert total == 0
 
     logoff(context.router_pid)
   end
