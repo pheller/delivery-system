@@ -39,10 +39,16 @@ defmodule Prodigy.Server.Service.BulletinBoards do
       <<0, 0, 0xF, club_handle::bytes-size(3), 0xC>> ->
         handle_list_topics(club_handle, context)
 
-      # Start cursor for notes since date/time
-      <<0, 0, 0x67, 0x24, mon::bytes-size(2), day::bytes-size(2), min::bytes-size(2),
-        hour::bytes-size(2), topic_id::16-big>> ->
-        handle_start_note_cursor(mon, day, min, hour, topic_id, context)
+      # Start cursor for notes since date/time.  Wire format is
+      # mmddHHMM (hour before minute).  Flag 0x24 = exclude older bulletins
+      # whose only activity since the threshold is replies (07/89 client);
+      # 0x04 = include them (03/89 client, which always sends 0x04).  The
+      # digit guard on the first hour byte disambiguates from the
+      # reply-setup request below, which also uses flag 0x04 but carries
+      # <<topic_len::16>> at that offset.
+      <<0, 0, 0x67, flag, mon::bytes-size(2), day::bytes-size(2), hh1, hh2,
+        min::bytes-size(2), topic_id::16-big>> when flag in [0x24, 0x04] and hh1 in ?0..?9 ->
+        handle_start_note_cursor(mon, day, min, <<hh1, hh2>>, topic_id, context, flag)
 
       # note cursor page selection
       <<0, 0, 0x67, 8, page_no::16-big, _mon::bytes-size(2), _day::bytes-size(2), _rest::binary >> ->
@@ -293,14 +299,29 @@ defmodule Prodigy.Server.Service.BulletinBoards do
     Repo.all(query)
   end
 
-  defp handle_start_note_cursor(mon, day, min, hour, topic_id, context) do
-    Logger.debug("Starting note cursor for topic #{topic_id} from #{mon}/#{day} #{hour}:#{min}")
+  defp handle_start_note_cursor(mon, day, min, hour, topic_id, context, flag) do
+    include_replies = flag == 0x04
+
+    Logger.debug(
+      "Starting note cursor for topic #{topic_id} from #{mon}/#{day} #{hour}:#{min} " <>
+      "(#{if include_replies, do: "include", else: "exclude"} older bulletins with newer replies)")
 
     threshold_datetime = parse_datetime(mon, day, min, hour)
-    note_ids = get_posts_since_threshold(topic_id, threshold_datetime)
 
-    topic = Repo.get(Topic, topic_id)
-    update_last_read_date(context.user.id, topic.club_id)
+    note_ids =
+      case Repo.get(Topic, topic_id) do
+        nil ->
+          # The client only sends topic ids it received from the topic
+          # list, so this should not arise; tolerate it by answering as a
+          # valid topic with no matching bulletins, which the client
+          # renders as its "no results" message.
+          Logger.warning("note cursor start for unknown topic #{topic_id}")
+          []
+
+        topic ->
+          update_last_read_date(context.user.id, topic.club_id)
+          get_posts_since_threshold(topic_id, threshold_datetime, include_replies)
+      end
 
     context = Map.merge(context, %{
       bb: %{
@@ -492,16 +513,26 @@ defmodule Prodigy.Server.Service.BulletinBoards do
 
   # Database Queries
 
-  defp get_posts_since_threshold(topic_id, threshold_datetime) do
-    Repo.all(
-      from p in Post,
-      left_join: r in Post, on: r.in_reply_to == p.id,
-      where: p.topic_id == ^topic_id and is_nil(p.in_reply_to),
-      where: p.sent_date >= ^threshold_datetime or r.sent_date >= ^threshold_datetime,
-      group_by: p.id,
-      order_by: [asc: p.sent_date],
-      select: p.id
-    )
+  defp get_posts_since_threshold(topic_id, threshold_datetime, include_replies) do
+    query =
+      if include_replies do
+        # Also admit older bulletins whose replies fall after the threshold
+        from p in Post,
+          left_join: r in Post, on: r.in_reply_to == p.id,
+          where: p.topic_id == ^topic_id and is_nil(p.in_reply_to),
+          where: p.sent_date >= ^threshold_datetime or r.sent_date >= ^threshold_datetime,
+          group_by: p.id,
+          order_by: [asc: p.sent_date],
+          select: p.id
+      else
+        from p in Post,
+          where: p.topic_id == ^topic_id and is_nil(p.in_reply_to),
+          where: p.sent_date >= ^threshold_datetime,
+          order_by: [asc: p.sent_date],
+          select: p.id
+      end
+
+    Repo.all(query)
   end
 
   defp get_all_replies_with_dates(post_id) do
