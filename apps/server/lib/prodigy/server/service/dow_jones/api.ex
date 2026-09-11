@@ -49,6 +49,19 @@ defmodule Prodigy.Server.Service.DowJones.Api do
   """
   def custom_quote(symbol, _fields) when is_binary(symbol) do
     sym = String.trim(symbol)
+
+    via_sidecar(sym)
+  end
+
+  # There was a DOWJONES_MOCK mode here that answered every symbol with
+  # "<SYM> MOCK CORP" at a fixed price, from when the upstream feed was down
+  # and the sidecar could not be relied on. The sidecar is now itself a fixture,
+  # so that second mock only did harm: it shadowed the roster, so ACME came back
+  # as "ACME MOCK CORP" rather than Acme Corporation, and it answered symbols we
+  # do not carry, so an unknown ticker got an invented quote instead of the
+  # error naming what we do have. One fixture, in one place.
+
+  defp via_sidecar(sym) do
     Logger.info("DowJones API: custom_quote(#{sym}) via sidecar")
 
     url = "#{@sidecar_url}/quote/#{URI.encode(sym)}"
