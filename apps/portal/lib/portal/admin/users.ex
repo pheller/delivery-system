@@ -25,7 +25,7 @@ defmodule Prodigy.Portal.Admin.Users do
 
   alias Ecto.Multi
   alias Prodigy.Core.Data.Repo
-  alias Prodigy.Core.Data.Service.{Household, Session, User}
+  alias Prodigy.Core.Data.Service.{Household, MemberStatus, Session, User}
   alias Prodigy.Portal.Admin.Sessions
   alias Prodigy.Portal.Admin.UserForm
   alias Prodigy.Server.SessionManager
@@ -205,32 +205,73 @@ defmodule Prodigy.Portal.Admin.Users do
   date_deleted is non-nil, but an already-open TCS session keeps running
   until the transport closes).
 
+  Also clears the member's ACTIVE bit in the household's per-member
+  indicators, so logon is blocked on that axis too and the enable/disable
+  pair is a true inverse - see `set_deleted_and_active/3`.
+
   Returns `{:ok, %User{}}` on success.
   """
   def soft_delete(%User{} = user) do
     _ = force_disconnect(user)
+    set_deleted_and_active(user, Date.utc_today(), false)
+  end
 
-    result =
-      user
-      |> change(%{date_deleted: Date.utc_today()})
-      |> Repo.update()
+  @doc """
+  Clear `date_deleted`, restoring the user to a signed-in-able state. Also
+  sets the member's ACTIVE bit (preserving ENROLLED), because clearing
+  `date_deleted` alone is not enough: `Logon.member_active/1` also gates on
+  the per-member ACTIVE bit in the household indicators, and for the
+  subscriber (slot A) no other admin- or service-reachable path sets it
+  (the in-service TOOLS screen manages B-F only). See `set_deleted_and_active/3`.
+  """
+  def undelete(%User{} = user) do
+    set_deleted_and_active(user, nil, true)
+  end
 
-    with {:ok, updated} <- result do
-      SessionManager.broadcast_profile_updated(updated.id)
-      {:ok, updated}
+  # Stamp/clear `date_deleted` and set the member's ACTIVE bit to match, in
+  # one transaction. `date_deleted` and the household indicators' ACTIVE bit
+  # are two independent logon gates (see Logon.deleted/1 and
+  # Logon.member_active/1); the admin's single enable/disable switch has to
+  # move both together or an "enabled" account can still be un-loginable (the
+  # DEMO99A case) and a "disabled" one can slip back in via the other axis.
+  # Uniform across slots A-F: the slot is derived from the user id.
+  defp set_deleted_and_active(%User{} = user, date_deleted, active?) do
+    Multi.new()
+    |> Multi.update(:user, change(user, %{date_deleted: date_deleted}))
+    |> Multi.run(:household, fn _repo, _changes -> set_member_active(user, active?) end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{user: updated_user}} ->
+        SessionManager.broadcast_profile_updated(updated_user.id)
+        {:ok, updated_user}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
     end
   end
 
-  @doc "Clear `date_deleted`, restoring the user to a signed-in-able state."
-  def undelete(%User{} = user) do
-    result =
-      user
-      |> change(%{date_deleted: nil})
-      |> Repo.update()
+  # Write the ACTIVE bit for this user's slot in the household indicators,
+  # preserving the ENROLLED bit. A non-slotted id (not ending A-F) has no
+  # indicator to move, so it's a no-op. Returns a Multi.run-shaped result.
+  defp set_member_active(%User{id: user_id, household_id: household_id}, active?) do
+    suffix = MemberStatus.suffix_of(user_id)
 
-    with {:ok, updated} <- result do
-      SessionManager.broadcast_profile_updated(updated.id)
-      {:ok, updated}
+    if suffix in ~w(A B C D E F) do
+      case Repo.get(Household, household_id) do
+        nil ->
+          {:error, :household_not_found}
+
+        %Household{} = household ->
+          profile = household.profile || %{}
+          enrolled? = MemberStatus.enrolled?(profile, suffix)
+          new_profile = MemberStatus.put_indicators(profile, suffix, active?, enrolled?)
+
+          household
+          |> change(%{profile: new_profile})
+          |> Repo.update()
+      end
+    else
+      {:ok, :no_slot}
     end
   end
 
