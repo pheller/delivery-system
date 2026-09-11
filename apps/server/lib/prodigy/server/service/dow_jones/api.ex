@@ -50,26 +50,16 @@ defmodule Prodigy.Server.Service.DowJones.Api do
   def custom_quote(symbol, _fields) when is_binary(symbol) do
     sym = String.trim(symbol)
 
-    if mock?() do
-      Logger.info("DowJones API: custom_quote(#{sym}) MOCK (DOWJONES_MOCK set)")
-      {:ok, {sym, mock_quote_json(sym)}}
-    else
-      via_sidecar(sym)
-    end
+    via_sidecar(sym)
   end
 
-  # Mock mode: return canned quote data instead of hitting the sidecar/Yahoo.
-  # Set DOWJONES_MOCK=1 for offline client development - every symbol resolves
-  # to a plausible fixed quote so the client's quote-check and symbol->name
-  # flows exercise end-to-end without the upstream. Wire real Yahoo later.
-  def mock?, do: System.get_env("DOWJONES_MOCK") in ["1", "true", "TRUE"]
-
-  defp mock_quote_json(sym) do
-    ~s({"quoteResponse":{"result":[{"shortName":"#{sym} MOCK CORP",) <>
-      ~s("regularMarketChange":1.25,"regularMarketDayHigh":101.50,) <>
-      ~s("regularMarketDayLow":99.00,"regularMarketOpen":100.00,) <>
-      ~s("regularMarketPrice":100.75,"regularMarketVolume":1234567}]}})
-  end
+  # There was a DOWJONES_MOCK mode here that answered every symbol with
+  # "<SYM> MOCK CORP" at a fixed price, from when the upstream feed was down
+  # and the sidecar could not be relied on. The sidecar is now itself a fixture,
+  # so that second mock only did harm: it shadowed the roster, so ACME came back
+  # as "ACME MOCK CORP" rather than Acme Corporation, and it answered symbols we
+  # do not carry, so an unknown ticker got an invented quote instead of the
+  # error naming what we do have. One fixture, in one place.
 
   defp via_sidecar(sym) do
     Logger.info("DowJones API: custom_quote(#{sym}) via sidecar")

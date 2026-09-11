@@ -49,9 +49,6 @@ services:
     ports:
       - "25234:25234"
     environment:
-      # DOWJONES_MOCK=1 returns canned quote/name data instead of the
-      # sidecar/Yahoo (offline client dev). Unset = real upstream.
-      - DOWJONES_MOCK=${DOWJONES_MOCK:-}
       - DB_NAME=${DB_NAME:?Set DB_NAME}
       - DB_USER=${DB_USER:?Set DB_USER}
       - DB_PASS=${DB_PASS:?Set DB_PASS}
