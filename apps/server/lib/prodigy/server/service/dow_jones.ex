@@ -25,6 +25,33 @@ defmodule Prodigy.Server.Service.DowJones do
   alias Prodigy.Server.Protocol.Dia.Packet.{Fm0, Fm64}
   alias Prodigy.Server.Context
 
+  # The invented roster, mirroring dowjones_sidecar/app.py. STOPGAP, until a
+  # real quote feed exists.
+  #
+  # Nothing real appears here on purpose. This module used to carry fabricated
+  # 1990 wire copy about General Motors and IBM, and a catch-all that invented
+  # news for any ticker a guest typed - so asking about a real company returned
+  # realistic-looking reporting it had made up. An exhibit should not put
+  # invented news or invented prices beside the name of a business that exists.
+  @roster [
+    {"ACME", "ACME CORPORATION"},
+    {"CYBR", "CYBERDYNE"},
+    {"WEYU", "WEYLAND-YUTANI"},
+    {"TYRL", "TYRELL CORP"},
+    {"OCPI", "OMNI CONSUMER"},
+    {"SOYL", "SOYLENT CORP"},
+    {"SPSP", "SPACELY SPROCKETS"},
+    {"COGS", "COGSWELL COGS"},
+    {"WONK", "WONKA INDS"},
+    {"NAKT", "NAKATOMI TRADING"},
+    {"GENC", "GENCO OLIVE OIL"},
+    {"YOYO", "YOYODYNE"}
+  ]
+  @roster_symbols Enum.map(@roster, &elem(&1, 0))
+
+  @doc "The invented roster, as {symbol, name}. Exposed so a test can check it against the sidecar's."
+  def roster, do: @roster
+
   defmodule QuoteData do
     @moduledoc false
     defstruct quoteResponse: nil
@@ -380,24 +407,17 @@ defmodule Prodigy.Server.Service.DowJones do
           |> Enum.map(fn {suffix, i} -> {"GRP" <> <<?A + i>> <> "0", "#{name} #{suffix}"} end)
 
         true ->
-          # SYMBOL / member mode: real tickers + names. 10 rows -> 3 picker pages
-          # (4+4+2) so NEXT/BACK paging is exercised (both active on the middle).
-          base = name |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 4)
-
-          [
-            "MOCK CORP",
-            "HOLDINGS INC",
-            "INDUSTRIES",
-            "TECHNOLOGIES",
-            "GROWTH FUND",
-            "INCOME FUND",
-            "VALUE FUND",
-            "INDEX FUND",
-            "GLOBAL FUND",
-            "BALANCED FUND"
-          ]
-          |> Enum.with_index()
-          |> Enum.map(fn {desc, i} -> {"#{base}#{<<?A + i>>}", "#{name} #{desc}"} end)
+          # SYMBOL / member mode. Match the invented roster on a name prefix or
+          # the symbol itself.
+          #
+          # This used to take whatever was typed and append suffixes to it, so
+          # searching a real company came back with rows like "<REAL NAME>
+          # HOLDINGS INC" - names of businesses that do not exist, attached to
+          # one that does. Matching a fixed roster means a miss is honestly a
+          # miss, and every hit is something we invented.
+          Enum.filter(@roster, fn {sym, nm} ->
+            String.starts_with?(nm, name) or sym == name
+          end)
       end
 
     rows =
@@ -690,11 +710,16 @@ defmodule Prodigy.Server.Service.DowJones do
   # --- HI500010 quote-track saved-list store (per-user, ETS) -----------------
   # Seeded on first read so quote-track shows data offline; LIST 1 has 12 symbols
   # (3 pages) to exercise paging. Keyed {:qt_list, user_id, name} in :dow_jones.
+
+  # Twelve is what this list held when quotes came off a live feed, so the
+  # picker still fills three pages and NEXT/BACK stay exercised.
   @qt_default_lists %{
-    "QUOTE TRACK 1" =>
-      for(s <- ~w(IBM GM AAPL MSFT XRX GT F KO GE HPQ INTC T), do: {"1", s}),
-    "QUOTE TRACK 2" => [{"1", "MSFT"}, {"1", "XRX"}, {"1", "GT"}]
+    "QUOTE TRACK 1" => for(s <- @roster_symbols, do: {"1", s}),
+    "QUOTE TRACK 2" => [{"1", "ACME"}, {"1", "TYRL"}, {"1", "OCPI"}]
   }
+
+  @doc "The seeded Quote Track lists. Exposed so a test can check them against the sidecar."
+  def default_lists, do: @qt_default_lists
   @qt_list_names ["QUOTE TRACK 1", "QUOTE TRACK 2"]
 
   defp qt_key(user_id, name), do: {:qt_list, user_id, name}
@@ -810,76 +835,93 @@ defmodule Prodigy.Server.Service.DowJones do
     Enum.reverse(lines)
   end
 
-  defp news_for("GM") do
-    {"GENERAL MOTORS CORP",
+  # --- the invented roster ---------------------------------------------------
+  # These five are what the quote sidecar carries, so they are the five a guest
+  # is told to try. Each needs news of its own or the error message sends people
+  # to a company with nothing to read. Written as 1990 wire copy, because that
+  # is what the surrounding page is pretending to be.
+
+  defp news_for("ACME") do
+    {"ACME CORPORATION",
      [
-       "08/17/90 GM Idles Plant In California; Firms Plan Weekly Output\n" <>
-         "   DETROIT -- General Motors Corp. said the six-day strike at a parts " <>
-         "plant in Flint, Mich., forced the company to idle the Van Nuys, Calif., " <>
-         "assembly plant that builds the Pontiac Firebird and Chevrolet Camaro.\n" <>
-         "   The California facility was closed yesterday, putting about 3,500 " <>
-         "employees out of work. It will reopen Monday.",
-       "08/16/90 Sponsors Tough To Find In Ad Slowdown\n" <>
-         "   NEW YORK -- Advertisers pulled back this quarter, making sponsors " <>
-         "harder to find across broadcast and print, media buyers said.",
-       "08/16/90 GM's EDS Unit Signs Pact With Permian Corp.\n" <>
-         "   DALLAS -- Electronic Data Systems, the GM unit, said it signed a " <>
-         "multiyear information-services contract with Permian Corp.",
-       "08/15/90 GM Reports Higher Quarterly Earnings On Truck Demand\n" <>
-         "   DETROIT -- General Motors Corp. posted improved quarterly results, " <>
-         "citing strong demand for light trucks and cost controls.",
-       "08/15/90 GM Europe Unit Plans New Assembly Line\n" <>
-         "   RUESSELSHEIM -- Adam Opel AG outlined plans for a new assembly line " <>
-         "to meet demand for its compact models.",
-       "08/14/90 GM Board Reviews Capital Spending Plan\n" <>
-         "   DETROIT -- Directors met to review the auto maker's multiyear " <>
-         "capital-spending program, people familiar with the matter said."
+       "08/17/90 Acme Recalls Rocket Skates After Field Reports\n" <>
+         "   FAIRFIELD, N.J. -- Acme Corporation said it is recalling its " <>
+         "Model 7 rocket skates after reports of unintended acceleration in " <>
+         "desert conditions. The company said fewer than 400 units shipped.\n" <>
+         "   A spokesman said the recall would not affect full-year results.",
+       "08/16/90 Acme Opens Second Anvil Line In Ohio\n" <>
+         "   TOLEDO -- Acme Corporation began production at a second anvil " <>
+         "line, citing sustained demand from what it called the novelty " <>
+         "gravity segment.",
+       "08/15/90 Acme Names New Head Of Portable Hole Division\n" <>
+         "   FAIRFIELD, N.J. -- The company promoted a 19-year veteran to lead " <>
+         "its portable hole business, which it said returned to profit."
      ]}
   end
 
-  # Deliberately long single story (~5 screens) to exercise article pagination.
-  defp news_for("IBM") do
-    {"INTL BUSINESS MACHINES",
+  defp news_for("CYBR") do
+    {"CYBERDYNE SYSTEMS CORP",
      [
-       "08/17/90 IBM Outlines Multiyear Plan To Reshape Its Mainframe Business\n" <>
-         "   ARMONK -- International Business Machines Corp. detailed a sweeping " <>
-         "multiyear plan to reshape its mainframe business, telling analysts it " <>
-         "would invest heavily in new processor lines while trimming costs across " <>
-         "its manufacturing operations over the next several quarters.\n" <>
-         "   PARAGRAPH TWO. The company said demand for its largest systems " <>
-         "remained uneven as corporate customers stretched out purchasing cycles " <>
-         "and weighed smaller, cheaper machines that increasingly rivaled the " <>
-         "performance of traditional mainframes at a fraction of the price.\n" <>
-         "   PARAGRAPH THREE. Executives told the meeting that software and " <>
-         "services would take on a larger role in the company's revenue mix, and " <>
-         "that the sales force would be retrained to sell complete solutions " <>
-         "rather than individual boxes to its largest accounts.\n" <>
-         "   PARAGRAPH FOUR. Analysts pressed management on margins, noting that " <>
-         "aggressive pricing from competitors had squeezed profitability in the " <>
-         "midrange, where newer entrants had gained share quarter after quarter " <>
-         "throughout the year despite the company's established base.\n" <>
-         "   PARAGRAPH FIVE. The company reaffirmed its commitment to research " <>
-         "spending, saying laboratories in New York and California would continue " <>
-         "work on advanced storage, parallel processing and the networking " <>
-         "technologies it expects to anchor the next decade of products.\n" <>
-         "   PARAGRAPH SIX. Management closed the session by reiterating its " <>
-         "outlook for the second half, cautioning that currency swings and a " <>
-         "softening in Europe could weigh on results even as the domestic order " <>
-         "book showed early, tentative signs of stabilizing."
+       "08/17/90 Cyberdyne Wins Defense Contract For Control Systems\n" <>
+         "   SUNNYVALE, Calif. -- Cyberdyne Systems Corp. said it received a " <>
+         "multiyear award to supply automated control systems, without " <>
+         "disclosing terms.\n" <>
+         "   Analysts said the award roughly doubles the unit's backlog.",
+       "08/16/90 Cyberdyne Raises Research Spending 40%\n" <>
+         "   SUNNYVALE, Calif. -- The company said it will lift research " <>
+         "spending sharply, concentrating on machine learning and neural " <>
+         "processors."
+     ]}
+  end
+
+  defp news_for("WEYU") do
+    {"WEYLAND-YUTANI CORP",
+     [
+       "08/17/90 Weyland-Yutani Expands Cargo Fleet\n" <>
+         "   LONDON -- Weyland-Yutani Corp. ordered additional commercial " <>
+         "towing vessels, citing long-haul contracts on outer routes.\n" <>
+         "   The company said deliveries begin next year.",
+       "08/16/90 Weyland-Yutani Unit Reports Survey Delay\n" <>
+         "   LONDON -- A subsidiary said a scheduled survey has been postponed " <>
+         "and declined to give a reason."
+     ]}
+  end
+
+  defp news_for("TYRL") do
+    {"TYRELL CORPORATION",
+     [
+       "08/17/90 Tyrell Reports Record Quarter On Genetics Unit\n" <>
+         "   LOS ANGELES -- Tyrell Corporation posted record quarterly results, " <>
+         "crediting its genetic design business and lower manufacturing costs.\n" <>
+         "   The company raised its full-year forecast.",
+       "08/15/90 Tyrell To Build Research Campus\n" <>
+         "   LOS ANGELES -- The company said it will develop a research campus " <>
+         "downtown, consolidating three existing sites."
+     ]}
+  end
+
+  defp news_for("OCPI") do
+    {"OMNI CONSUMER PRODUCTS",
+     [
+       "08/17/90 OCP Wins Detroit Services Contract\n" <>
+         "   DETROIT -- Omni Consumer Products said it agreed to provide " <>
+         "municipal services under a contract the city council approved " <>
+         "Thursday.\n" <>
+         "   The company said the award supports its urban redevelopment plan.",
+       "08/16/90 OCP Delays Delta City Groundbreaking\n" <>
+         "   DETROIT -- The company pushed back groundbreaking on its Delta " <>
+         "City project, citing permitting."
      ]}
   end
 
   defp news_for(sym) when sym in ["", nil], do: {"", []}
 
+  # Anything off the roster: the real name, no stories, so the client renders
+  # its "no news stories" path. This used to synthesise a story for whatever
+  # was typed, which meant asking about a real company returned invented
+  # reporting about it.
   defp news_for(sym) do
-    name = qt_short_name(sym)
-
-    {name,
-     [
-       "08/17/90 #{name} In Focus As Analysts Weigh Outlook\n" <>
-         "   NEW YORK -- Analysts said #{name} remains a closely watched name " <>
-         "this week as investors weigh the company's near-term outlook."
-     ]}
+    {qt_short_name(sym), []}
   end
 
   # Display name for a ticker: ETS name cache, else decode_quote, else the ticker.

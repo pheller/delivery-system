@@ -2,8 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# The quote library pulls curl_cffi as its HTTP client. Ship a slim
-# base image; no compiled deps required for our pinned versions.
+# Nothing but FastAPI and uvicorn now - the fixture needs no quote library
+# and no HTTP client, so the slim base has everything required.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
