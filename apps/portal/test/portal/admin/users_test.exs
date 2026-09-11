@@ -16,7 +16,7 @@
 defmodule Prodigy.Portal.Admin.UsersTest do
   use Prodigy.Portal.DataCase, async: true
 
-  alias Prodigy.Core.Data.Service.{Enroller, Household, User}
+  alias Prodigy.Core.Data.Service.{Enroller, Household, MemberStatus, User}
   alias Prodigy.Portal.Admin.Users
 
   defp subscriber!(id \\ "AAAA11") do
@@ -301,6 +301,60 @@ defmodule Prodigy.Portal.Admin.UsersTest do
       reloaded = Repo.get(User, updated.id)
       assert reloaded.profile["015E"] == "Carmichael"
       assert reloaded.profile["0157"] == "F"
+    end
+  end
+
+  describe "soft_delete/1 and undelete/1 (per-member ACTIVE bit)" do
+    test "disable clears, enable sets the subscriber's (slot A) ACTIVE bit, with date_deleted" do
+      {_hh, user} = subscriber!()
+      hh0 = Repo.get(Household, user.household_id)
+      assert MemberStatus.active?(hh0.profile, "A")
+
+      {:ok, deleted} = Users.soft_delete(user)
+      assert deleted.date_deleted == Date.utc_today()
+      hh1 = Repo.get(Household, user.household_id)
+      refute MemberStatus.active?(hh1.profile, "A")
+
+      {:ok, restored} = Users.undelete(deleted)
+      assert restored.date_deleted == nil
+      hh2 = Repo.get(Household, user.household_id)
+      assert MemberStatus.active?(hh2.profile, "A")
+    end
+
+    test "enable preserves the ENROLLED bit" do
+      {_hh, user} = subscriber!()
+      enrolled0 = MemberStatus.enrolled?(Repo.get(Household, user.household_id).profile, "A")
+
+      {:ok, deleted} = Users.soft_delete(user)
+      {:ok, _restored} = Users.undelete(deleted)
+
+      hh = Repo.get(Household, user.household_id)
+      assert MemberStatus.enrolled?(hh.profile, "A") == enrolled0
+      assert MemberStatus.active?(hh.profile, "A")
+    end
+
+    test "toggles the addressed slot (B) and leaves the subscriber (A) untouched" do
+      {hh, _subscriber} = subscriber!()
+
+      profile_b =
+        hh.profile
+        |> MemberStatus.put_suffix_in_use("B")
+        |> MemberStatus.put_indicators("B", true, true)
+
+      {:ok, hh} = hh |> Ecto.Changeset.change(%{profile: profile_b}) |> Repo.update()
+
+      # id/household_id aren't cast by User.changeset, so build the row directly.
+      member_b = Repo.insert!(%User{id: hh.id <> "B", household_id: hh.id, password: "SECRET"})
+
+      {:ok, _} = Users.soft_delete(member_b)
+      hh1 = Repo.get(Household, hh.id)
+      refute MemberStatus.active?(hh1.profile, "B")
+      assert MemberStatus.active?(hh1.profile, "A")
+
+      {:ok, _} = Users.undelete(member_b)
+      hh2 = Repo.get(Household, hh.id)
+      assert MemberStatus.active?(hh2.profile, "B")
+      assert MemberStatus.active?(hh2.profile, "A")
     end
   end
 end
