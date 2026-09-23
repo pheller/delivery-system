@@ -33,6 +33,26 @@ defmodule Prodigy.Core.Data.Repo.Migrations.BackfillProfileJsonb do
   def up do
     flush()
 
+    # A fresh database has nothing to backfill, and the queries below go through
+    # the LIVE schema modules - so they select whatever columns
+    # Prodigy.Core.Data.Service.User has grown since April, which do not exist
+    # at this point in the migration history. (Adding `sandbox` to that schema
+    # broke migrate-from-empty here.) Historical databases already ran the body
+    # when their rows and legacy columns were both present.
+    if no_rows_to_backfill?() do
+      :ok
+    else
+      backfill()
+    end
+  end
+
+  # Literal sources: a pinned table name is not a valid Ecto query source here.
+  defp no_rows_to_backfill? do
+    Repo.one(from(u in "user", select: count())) == 0 and
+      Repo.one(from(h in "household", select: count())) == 0
+  end
+
+  defp backfill do
     Repo.transaction(fn ->
       Enum.each(Repo.all(User), fn user ->
         profile = ProfileBackfill.user(user)
