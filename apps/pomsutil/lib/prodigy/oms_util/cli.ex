@@ -78,6 +78,11 @@ defmodule Prodigy.OmsUtil.CLI do
           --concurrency-limit <n>  Set the maximum concurrent sessions for this user
                                   (default: 1, use 0 for unlimited)
 
+          --sandbox                Mark the A user sandboxed: the server accepts and
+                                  acknowledges everything it does, but rolls the whole
+                                  service call back, so nothing persists. Used for the
+                                  public demo account.
+
           --enroll "First Last"    Mark the A user enrolled (sets date_enrolled,
                                   first_name, last_name, default gender/title) and
                                   mirror the name into the household's A slot so
@@ -121,7 +126,8 @@ defmodule Prodigy.OmsUtil.CLI do
           database: :string,
           like: :string,
           concurrency_limit: :integer,
-          enroll: :string
+          enroll: :string,
+          sandbox: :boolean
         ]
       )
 
@@ -157,7 +163,8 @@ defmodule Prodigy.OmsUtil.CLI do
         args = %{
           id: id,
           concurrency_limit: Map.get(args, :concurrency_limit, 1),
-          enroll: Map.get(args, :enroll)
+          enroll: Map.get(args, :enroll),
+          sandbox: Map.get(args, :sandbox, false)
         }
 
         Create.exec(rest, args)

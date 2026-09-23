@@ -78,6 +78,7 @@ defmodule Prodigy.Core.Data.Service.Enroller do
     concurrency_limit = Keyword.get(opts, :concurrency_limit, 1)
     enroll_name = Keyword.get(opts, :enroll_name)
     portal_user_id = Keyword.get(opts, :portal_user_id)
+    sandbox = Keyword.get(opts, :sandbox, false)
 
     cond do
       concurrency_limit < 0 ->
@@ -87,11 +88,11 @@ defmodule Prodigy.Core.Data.Service.Enroller do
         {:error, :household_exists}
 
       true ->
-        do_create(household_id, password, concurrency_limit, enroll_name, portal_user_id)
+        do_create(household_id, password, concurrency_limit, enroll_name, portal_user_id, sandbox)
     end
   end
 
-  defp do_create(household_id, password, concurrency_limit, enroll_name, portal_user_id) do
+  defp do_create(household_id, password, concurrency_limit, enroll_name, portal_user_id, sandbox) do
     today = DateTime.to_date(DateTime.utc_now())
     user_id = household_id <> "A"
 
@@ -102,7 +103,8 @@ defmodule Prodigy.Core.Data.Service.Enroller do
         %User{
           id: user_id,
           concurrency_limit: concurrency_limit,
-          portal_user_id: portal_user_id
+          portal_user_id: portal_user_id,
+          sandbox: sandbox
         }
         |> User.changeset(user_attrs(enroll_name, today, password))
       ])

@@ -228,6 +228,34 @@ defmodule Prodigy.Portal.Admin.Users do
     set_deleted_and_active(user, nil, true)
   end
 
+  @doc """
+  Turn the sandbox flag on or off for a service user.
+
+  A sandboxed user's service calls are wrapped in a transaction the router
+  always rolls back (see `Prodigy.Server.Router`): everything they do is
+  accepted and acknowledged, and none of it persists. That is how the public
+  demo account is kept safe, and it doubles as containment for an abusive
+  account - the session keeps working and the user gets no signal, but nothing
+  they do lands.
+
+  Takes effect on the user's NEXT logon: the router reads the flag off the
+  `%User{}` captured on the context at logon time. Use `force_disconnect/1` to
+  make it immediate.
+  """
+  def set_sandbox(%User{} = user, sandbox?) when is_boolean(sandbox?) do
+    user
+    |> change(%{sandbox: sandbox?})
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        SessionManager.broadcast_profile_updated(updated.id)
+        {:ok, updated}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # Stamp/clear `date_deleted` and set the member's ACTIVE bit to match, in
   # one transaction. `date_deleted` and the household indicators' ACTIVE bit
   # are two independent logon gates (see Logon.deleted/1 and

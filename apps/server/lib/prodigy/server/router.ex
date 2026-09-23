@@ -30,6 +30,8 @@ defmodule Prodigy.Server.Router do
 
   require Logger
   use GenServer
+  alias Prodigy.Core.Data.Repo
+  alias Prodigy.Core.Data.Service.User
   alias Prodigy.Server.Protocol.Dia.Packet.Fm0
   alias Prodigy.Server.Context
 
@@ -170,7 +172,7 @@ defmodule Prodigy.Server.Router do
           Default
       end
 
-    case service.handle(packet, state.context) do
+    case dispatch(service, packet, state.context) do
       {:ok, %Context{} = context} ->
         {:reply, {:ok}, %{state | context: context}}
 
@@ -185,6 +187,53 @@ defmodule Prodigy.Server.Router do
         {:reply, {:ok, response}, %Context{}}
     end
   end
+
+  # A sandboxed session runs every service call inside a transaction that is
+  # always rolled back. The handler executes for real - it builds the same
+  # response the client would get from a genuine write, and sees its own writes
+  # within the request - and then nothing persists.
+  #
+  # This sits at the single dispatch seam rather than in the handlers, so a
+  # service revived later is sandboxed whether or not anyone remembered it
+  # existed. That is the point: `sandbox_bypass?/1` below defaults to false.
+  #
+  # Ecto joins a nested `Repo.transaction` to this outer one, so a service's own
+  # transactions commit into it and are discarded with it. That holds only
+  # because no service calls `Repo.rollback/1` - an inner rollback would unwind
+  # this transaction and skip the rest of the handler, taking a different path
+  # under the wrap than without it. See the guard test in router_sandbox_test.
+  defp dispatch(service, packet, context) do
+    if sandboxed?(context) and not sandbox_bypass?(service) do
+      {:error, {:sandboxed, result}} =
+        # Default mode, deliberately. `mode: :savepoint` DISCARDS the value
+        # passed to Repo.rollback/1 - it returns {:error, :rollback} - which
+        # loses the handler's response and leaves the client with nothing.
+        Repo.transaction(fn ->
+          Repo.rollback({:sandboxed, service.handle(packet, context)})
+        end)
+
+      result
+    else
+      service.handle(packet, context)
+    end
+  end
+
+  @doc false
+  # Public alongside sandbox_bypass?/1 so the policy is asserted directly.
+  def sandboxed?(%Context{user: %User{sandbox: true}}), do: true
+  def sandboxed?(_context), do: false
+
+  # Services that must persist even for a sandboxed session: the session
+  # lifecycle itself (Logon writes the session row and the last-logon stamp,
+  # Logoff closes it) and usage telemetry. Everything else is wrapped - a new
+  # service is sandboxed by default, and exempting one is a deliberate act here.
+  @doc false
+  # Public so the policy itself can be asserted in a test rather than
+  # re-implemented there.
+  def sandbox_bypass?(Logon), do: true
+  def sandbox_bypass?(Logoff), do: true
+  def sandbox_bypass?(DataCollection), do: true
+  def sandbox_bypass?(_service), do: false
 
   @impl GenServer
   def terminate(reason, %{context: %Context{user: user}} = _state) do
