@@ -21,20 +21,26 @@ defmodule Prodigy.Portal.InvitationController do
     * `:signup_invitation` - new email. Confirming creates the
       portal user, attaches any provider identity the token
       carried (OAuth-seeded signup), marks the user confirmed,
-      and logs them in.
+      and logs them in. If the address acquired an account
+      between mint and click (a duplicate link, an OAuth signup,
+      a concurrent winner), confirming logs that account in
+      instead of failing - see `Accounts.consume_signup_invitation/1`.
     * `:provider_link_invitation` - existing user, new provider.
       Confirming attaches the provider identity to the user and
       logs them in.
 
   Dismissing either kind of token runs through `dismiss_invitation/1`
   in `Prodigy.Portal.Accounts`: the token is deleted, the email is
-  blacklisted for 30 days with reason `"wasnt_me"`, and a uniform
-  "request cancelled" landing page is shown. The landing page is
+  blacklisted for 30 days with reason `"wasnt_me"` *unless the address
+  already has an account*, and a uniform "request cancelled" landing
+  page is shown. The landing page is
   deliberately the same regardless of whether the token was valid -
   an expired or forged token produces the same page so nothing leaks
   about token validity.
   """
   use Prodigy.Portal, :controller
+
+  require Logger
 
   alias Prodigy.Portal.Accounts
   alias Prodigy.Portal.UserAuth
@@ -72,7 +78,22 @@ defmodule Prodigy.Portal.InvitationController do
 
           {:error, :invalid} ->
             render_invalid_page(conn)
+
+          # `consume_provider_link_invitation/1` can surface a changeset out
+          # of the identity attach through `Repo.transact`. Never crash the
+          # request over it - the holder of a link can't act on a 500.
+          {:error, reason} ->
+            Logger.error("unexpected consume_provider_link_invitation result: #{inspect(reason)}")
+
+            render_invalid_page(conn)
         end
+
+      # Terminal clause. Anything this case doesn't name is a bug, but a
+      # confirmation link is the one URL a user has no way to retry
+      # differently, so it renders the invalid-link page rather than raising.
+      {:error, reason} ->
+        Logger.error("unexpected consume_signup_invitation result: #{inspect(reason)}")
+        render_invalid_page(conn)
     end
   end
 

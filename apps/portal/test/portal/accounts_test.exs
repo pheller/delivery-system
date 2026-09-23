@@ -18,6 +18,7 @@ defmodule Prodigy.Portal.AccountsTest do
 
   alias Prodigy.Portal.Accounts
 
+  import Ecto.Query, only: [from: 2]
   import Prodigy.Portal.AccountsFixtures
   alias Prodigy.Core.Data.Portal.{User, UserToken}
 
@@ -573,7 +574,11 @@ defmodule Prodigy.Portal.AccountsTest do
       assert Prodigy.Portal.Accounts.Blacklist.blacklisted?(email)
     end
 
-    test "deletes a provider_link_invitation token and blacklists the email" do
+    # Changed deliberately: a provider-link token is minted against an existing
+    # user by definition, so blacklisting here disabled the account owner's own
+    # magic-link login for 30 days. Deleting the token is what the "wasn't me"
+    # email actually promises, and the unwanted link is still refused.
+    test "deletes a provider_link_invitation token without blacklisting the owner" do
       user = user_fixture()
 
       {encoded, token} =
@@ -583,7 +588,18 @@ defmodule Prodigy.Portal.AccountsTest do
 
       assert :ok = Accounts.dismiss_invitation(encoded)
       refute Repo.get_by(UserToken, sent_to: user.email, context: "provider_link_invitation")
-      assert Prodigy.Portal.Accounts.Blacklist.blacklisted?(user.email)
+      refute Prodigy.Portal.Accounts.Blacklist.blacklisted?(user.email)
+      assert Accounts.list_identities(user) == []
+    end
+
+    test "does not blacklist a signup_invitation address that has an account" do
+      user = user_fixture()
+      {encoded, token} = UserToken.build_signup_invitation_token(user.email)
+      Repo.insert!(token)
+
+      assert :ok = Accounts.dismiss_invitation(encoded)
+      refute Repo.get_by(UserToken, sent_to: user.email, context: "signup_invitation")
+      refute Prodigy.Portal.Accounts.Blacklist.blacklisted?(user.email)
     end
 
     test "unknown / expired token -> still :ok, nothing to do" do
@@ -746,6 +762,115 @@ defmodule Prodigy.Portal.AccountsTest do
       assert {:error, :not_redeemable} = Invites.redeem(invite, u2)
       # The first redeemer stands; the loser did not overwrite it.
       assert Repo.get(Invite, invite.id).redeemer_id == u1.id
+    end
+
+    # The idempotent-login branch runs ahead of the invite gate, so a second
+    # link carrying the code the FIRST click already redeemed must not be
+    # reported as :invite_taken, and must not burn a second invite.
+    test "second token carrying the same code logs in, doesn't re-redeem", %{invite: invite} do
+      email = "gate-#{System.unique_integer([:positive])}@example.com"
+
+      {encoded_a, token_a} =
+        UserToken.build_signup_invitation_token(email, %{"invite_code" => invite.code})
+
+      Repo.insert!(token_a)
+
+      {encoded_b, token_b} =
+        UserToken.build_signup_invitation_token(email, %{"invite_code" => invite.code})
+
+      Repo.insert!(token_b)
+
+      assert {:ok, %User{id: uid}} = Accounts.consume_signup_invitation(encoded_a)
+      assert {:ok, %User{id: ^uid}} = Accounts.consume_signup_invitation(encoded_b)
+
+      redeemed = Repo.get(Invite, invite.id)
+      assert redeemed.redeemer_id == uid
+      assert Repo.aggregate(from(u in User, where: u.email == ^email), :count) == 1
+    end
+
+    test "registered address with no carried invite logs in, not :invite_required" do
+      user = user_fixture()
+      {encoded, token} = UserToken.build_signup_invitation_token(user.email)
+      Repo.insert!(token)
+
+      assert {:ok, %User{id: id}} = Accounts.consume_signup_invitation(encoded)
+      assert id == user.id
+      refute Repo.get_by(UserToken, sent_to: user.email, context: "signup_invitation")
+    end
+  end
+
+  describe "consume_signup_invitation/1 on an already-registered address" do
+    test "returns the existing user and burns the token (open mode)" do
+      user = user_fixture()
+      {encoded, token} = UserToken.build_signup_invitation_token(user.email)
+      Repo.insert!(token)
+
+      assert {:ok, %User{id: id}} = Accounts.consume_signup_invitation(encoded)
+      assert id == user.id
+      refute Repo.get_by(UserToken, sent_to: user.email, context: "signup_invitation")
+      assert Repo.aggregate(from(u in User, where: u.email == ^user.email), :count) == 1
+    end
+
+    # portal_users.email is citext, so the pre-check lookup is case-insensitive
+    # and a token minted for a differently-cased spelling still resolves to the
+    # same account rather than falling through to a duplicate insert.
+    test "matches the existing account case-insensitively" do
+      user = user_fixture()
+      shouty = String.upcase(user.email)
+      refute shouty == user.email
+
+      {encoded, token} = UserToken.build_signup_invitation_token(shouty)
+      Repo.insert!(token)
+
+      assert {:ok, %User{id: id}} = Accounts.consume_signup_invitation(encoded)
+      assert id == user.id
+      assert Repo.aggregate(from(u in User, where: u.email == ^user.email), :count) == 1
+    end
+
+    # The fallback arm: register_user failed for a reason that is NOT
+    # uniqueness, so there is no account to fall back to. Must surface the
+    # generic invalid response, never a raise and never a mislabelled
+    # "already registered".
+    test "a token whose address can't be registered returns :invalid, not a crash" do
+      {encoded, token} = UserToken.build_signup_invitation_token("not-a-valid-address")
+      Repo.insert!(token)
+
+      assert {:error, :invalid} = Accounts.consume_signup_invitation(encoded)
+      refute Accounts.get_user_by_email("not-a-valid-address")
+    end
+
+    # Confirming is a trust upgrade, so it purges everything minted while the
+    # account was still unconfirmed - same as login_user_by_magic_link/1.
+    # Reachable via Provisioning.ensure_api_key/1, which creates portal users
+    # without confirming them.
+    test "confirming an unconfirmed account purges its other outstanding tokens" do
+      user = unconfirmed_user_fixture()
+      refute user.confirmed_at
+
+      # Something else outstanding for that account.
+      {stale, _hashed} = generate_user_magic_link_token(user)
+      assert Repo.get_by(UserToken, user_id: user.id, context: "login")
+
+      {encoded, token} = UserToken.build_signup_invitation_token(user.email)
+      Repo.insert!(token)
+
+      assert {:ok, %User{id: id} = confirmed} = Accounts.consume_signup_invitation(encoded)
+      assert id == user.id
+      assert confirmed.confirmed_at
+
+      # The stale login token died with the transition, and so did the signup token.
+      refute Repo.get_by(UserToken, user_id: user.id, context: "login")
+      refute Repo.get_by(UserToken, sent_to: user.email, context: "signup_invitation")
+      assert {:error, :not_found} = Accounts.login_user_by_magic_link(stale)
+    end
+
+    test "a blacklisted address still wins over the existing account" do
+      user = user_fixture()
+      {:ok, _} = Prodigy.Portal.Accounts.Blacklist.add(user.email, "wasnt_me")
+      {encoded, token} = UserToken.build_signup_invitation_token(user.email)
+      Repo.insert!(token)
+
+      assert {:error, :invalid} = Accounts.consume_signup_invitation(encoded)
     end
   end
 end

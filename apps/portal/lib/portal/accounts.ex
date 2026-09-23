@@ -542,17 +542,35 @@ defmodule Prodigy.Portal.Accounts do
   on the token, deletes the token, and returns `{:ok, user}`. Any
   failure - expired token, bad token, blacklisted email between
   mint and click - returns `{:error, :invalid}`.
+
+  If the address already has an account by click time - a second link
+  from a duplicate submit, an OAuth signup between mint and click, a
+  concurrent winner - this is an idempotent log-in: the token is
+  deleted and the existing user returned. The token was delivered to
+  that mailbox and is single-use with a short lifetime, so holding it
+  proves control of the address, which is the same basis on which
+  `login_user_by_magic_link/1` logs an existing user in. No second
+  registration happens and the invite gate does not apply.
   """
   def consume_signup_invitation(encoded_token) when is_binary(encoded_token) do
     with {:ok, query} <- UserToken.verify_invitation_token(encoded_token, "signup_invitation"),
          %UserToken{sent_to: email, data: data} = token <- Repo.one(query) do
       carried_code = if is_map(data), do: data["invite_code"], else: nil
       invite_mode = Settings.invitation_only?()
+      existing = get_user_by_email(email)
 
       cond do
         Blacklist.blacklisted?(email) ->
           Repo.delete!(token)
           {:error, :invalid}
+
+        # The address already has an account. Idempotent log-in, ahead of the
+        # invite gate: the account exists, so there is nothing to gate and
+        # nothing to redeem. Redeeming here would burn a second invite (or
+        # report the first click's own redemption as :invite_taken) for a user
+        # who is already registered.
+        not is_nil(existing) ->
+          log_in_existing(existing, token)
 
         # Authoritative gate: invite mode is on at click time but the token
         # carried no invite (minted while open, mode toggled on since). Distinct
@@ -562,24 +580,87 @@ defmodule Prodigy.Portal.Accounts do
 
         true ->
           Repo.transact(fn ->
-            with {:ok, user} <- register_user(%{email: email}),
-                 {:ok, confirmed} <- user |> User.confirm_changeset() |> Repo.update(),
-                 :ok <- maybe_attach_provider_identity(confirmed, data),
-                 :ok <- redeem_if_required(invite_mode, carried_code, confirmed) do
-              Repo.delete!(token)
-              {:ok, confirmed}
-            else
-              # Carried invite was redeemed/revoked (or vanished) between click
-              # and now - a shared single-use code, a concurrent winner. Surface
-              # a distinct "already used" so the caller offers a fresh code.
-              {:error, :invite_taken} -> {:error, :invite_taken}
-              other -> other
+            # Split out of the `with` below so a uniqueness failure here is
+            # distinguishable from a changeset out of the identity attach.
+            case register_user(%{email: email}) do
+              {:error, %Ecto.Changeset{}} ->
+                {:error, :already_registered}
+
+              {:ok, user} ->
+                with {:ok, confirmed} <- user |> User.confirm_changeset() |> Repo.update(),
+                     :ok <- maybe_attach_provider_identity(confirmed, data),
+                     :ok <- redeem_if_required(invite_mode, carried_code, confirmed) do
+                  Repo.delete!(token)
+                  {:ok, confirmed}
+                else
+                  # Carried invite was redeemed/revoked (or vanished) between
+                  # click and now - a shared single-use code, a concurrent
+                  # winner. Surface a distinct "already used" so the caller
+                  # offers a fresh code.
+                  {:error, :invite_taken} -> {:error, :invite_taken}
+                  other -> other
+                end
             end
           end)
+          |> case do
+            # A user appeared between the lookup above and the insert. The
+            # unique index caught it and the transaction rolled back; treat it
+            # exactly like the pre-checked case.
+            {:error, :already_registered} ->
+              case get_user_by_email(email) do
+                %User{} = user ->
+                  log_in_existing(user, token)
+
+                # register_user failed for some reason other than uniqueness
+                # (format, length). Don't mislabel it as an existing account.
+                nil ->
+                  {:error, :invalid}
+              end
+
+            other ->
+              other
+          end
       end
     else
       _ -> {:error, :invalid}
     end
+  end
+
+  # Log an already-registered address in off its signup token and burn the
+  # token. Both clauses mirror `login_user_by_magic_link/1` on the same inputs.
+  #
+  # Unconfirmed account: the guard first. An unconfirmed account that already
+  # has a password set must not be logged in from an emailed link
+  # (phx.gen.auth, "Mixing magic link and password registration" -
+  # session-fixation vector), so that case falls back to the generic
+  # invalid-link response rather than confirming the account.
+  #
+  # Otherwise confirming is a trust upgrade, so it goes through
+  # `update_user_and_delete_all_tokens/1` exactly as the magic-link path does:
+  # anything minted while the account was still unconfirmed dies with the
+  # transition, leaving only the session this request is about to create. The
+  # signup token itself carries `user_id: nil`, so the purge does not cover it
+  # and it is deleted explicitly first.
+  #
+  # Reachable because `Provisioning.ensure_api_key/1` creates portal users
+  # without confirming them - a signup link minted before such an account
+  # existed, clicked after, lands here.
+  defp log_in_existing(%User{confirmed_at: nil} = user, token) do
+    if user_has_password_identity?(user) do
+      {:error, :invalid}
+    else
+      Repo.delete!(token)
+
+      with {:ok, {confirmed, _expired_tokens}} <-
+             user |> User.confirm_changeset() |> update_user_and_delete_all_tokens() do
+        {:ok, confirmed}
+      end
+    end
+  end
+
+  defp log_in_existing(%User{} = user, token) do
+    Repo.delete!(token)
+    {:ok, user}
   end
 
   # Open mode: no redemption, no gate. Invite mode: the carried code MUST resolve
@@ -620,9 +701,21 @@ defmodule Prodigy.Portal.Accounts do
   end
 
   @doc """
-  Dismiss any invitation token: deletes it and blacklists the email
-  for 30 days. Returns `:ok` regardless (never leaks whether the
-  token was valid).
+  Dismiss any invitation token: deletes it, and blacklists the email
+  for 30 days *if no account holds that address*. Returns `:ok`
+  regardless (never leaks whether the token was valid, or whether the
+  address is registered).
+
+  The blacklist is skipped for an address that already has an account
+  because it is consulted by `request_access/3`, which drops blacklisted
+  addresses silently - blacklisting a live account would disable its
+  magic-link login for 30 days with no visible error, and no admin UI
+  exists to undo it. What both dismissal emails actually promise is to
+  stop sending mail to the address, and deleting the token does that.
+  This holds for provider-link tokens too, which are minted against an
+  existing user by definition: the defense against an unwanted provider
+  link is the confirmation click that never comes, not a blacklist entry
+  against the account owner's own address.
   """
   def dismiss_invitation(encoded_token) when is_binary(encoded_token) do
     token_row =
@@ -639,7 +732,11 @@ defmodule Prodigy.Portal.Accounts do
 
       %UserToken{sent_to: email} = token ->
         Repo.delete!(token)
-        {:ok, _} = Blacklist.add(email, "wasnt_me")
+
+        if is_nil(get_user_by_email(email)) do
+          {:ok, _} = Blacklist.add(email, "wasnt_me")
+        end
+
         :ok
     end
   end
