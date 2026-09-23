@@ -37,6 +37,10 @@ defmodule Prodigy.Core.Data.Service.User do
     field(:date_enrolled, :date)
     field(:date_deleted, :date)
     field(:concurrency_limit, :integer, default: 1)
+    # Operator-only flag. A sandboxed user's service dispatch is wrapped in a
+    # rolled-back transaction, so nothing they do in a session persists. Used
+    # for the public demo account. Not a profile TAC - the client never sees it.
+    field(:sandbox, :boolean, default: false)
 
     # JSONB profile store - the sole store for name, title, gender,
     # birthdate, jumpword paths, last-logon stamps, and every other

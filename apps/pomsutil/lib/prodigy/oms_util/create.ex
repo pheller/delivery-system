@@ -27,12 +27,14 @@ defmodule Create do
     {household_id, password} = parse_arguments(argv)
     concurrency_limit = Map.get(args, :concurrency_limit, 1)
     enroll_name = parse_enroll_name(Map.get(args, :enroll))
+    sandbox = Map.get(args, :sandbox, false)
 
     case Enroller.create_subscriber(
            household_id,
            password,
            concurrency_limit: concurrency_limit,
-           enroll_name: enroll_name
+           enroll_name: enroll_name,
+           sandbox: sandbox
          ) do
       {:ok, {_household, user}} ->
         IO.puts("- Created Household #{household_id}")
@@ -50,6 +52,10 @@ defmodule Create do
         if enroll_name do
           {first, last} = enroll_name
           IO.puts("   * Pre-enrolled as #{first} #{last}")
+        end
+
+        if sandbox do
+          IO.puts("   * Sandboxed: nothing this user does in a session persists")
         end
 
       {:error, :household_exists} ->

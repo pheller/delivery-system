@@ -34,8 +34,8 @@ fi
 # pomsutil create exits non-zero if the household already exists, which is
 # fine on re-runs - the outer sentinel usually prevents that, but we don't
 # want the seed to fail if someone pre-created DEMO99.
-echo "Creating demo account DEMO99A (unlimited concurrency, pre-enrolled)..."
-pomsutil create DEMO99 SECRET --concurrency-limit 0 --enroll "Demo Subscriber" \
+echo "Creating demo account DEMO99A (unlimited concurrency, pre-enrolled, sandboxed)..."
+pomsutil create DEMO99 SECRET --concurrency-limit 0 --sandbox --enroll "Demo Subscriber" \
   || echo "DEMO99 already exists - continuing."
 
 mkdir -p /init_state

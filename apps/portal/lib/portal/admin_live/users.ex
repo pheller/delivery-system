@@ -133,6 +133,12 @@ defmodule Prodigy.Portal.AdminLive.Users do
     end
   end
 
+  def handle_event("toggle_sandbox", %{"id" => id}, socket) do
+    with :ok <- require_scope(socket, :service_users, :delete) do
+      do_toggle_sandbox(socket, id)
+    end
+  end
+
   def handle_event("disconnect", %{"id" => id}, socket) do
     with :ok <- require_scope(socket, :service_users, :disconnect) do
       do_disconnect(socket, id)
@@ -176,6 +182,35 @@ defmodule Prodigy.Portal.AdminLive.Users do
           {:error, reason} ->
             {:noreply,
              put_flash(socket, :error, "Couldn't delete #{user.id}: #{inspect(reason)}")}
+        end
+    end
+  end
+
+  defp do_toggle_sandbox(socket, id) do
+    case Admin.get(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "User #{id} not found.")}
+
+      user ->
+        case Admin.set_sandbox(user, not user.sandbox) do
+          {:ok, updated} ->
+            # Unlike delete/undelete this has no icon swap the admin can read at
+            # a glance, and it only takes effect on the next logon - so say so.
+            {:noreply,
+             put_flash(
+               socket,
+               :info,
+               if updated.sandbox do
+                 "#{updated.id} is sandboxed - nothing they do will persist. " <>
+                   "Takes effect at their next logon; disconnect them to make it immediate."
+               else
+                 "#{updated.id} is no longer sandboxed. Takes effect at their next logon."
+               end
+             )}
+
+          {:error, reason} ->
+            {:noreply,
+             put_flash(socket, :error, "Couldn't change sandbox for #{user.id}: #{inspect(reason)}")}
         end
     end
   end
@@ -332,7 +367,7 @@ defmodule Prodigy.Portal.AdminLive.Users do
               <td>{full_name(row.user)}</td>
               <td><code class="text-muted">{row.user.household_id}</code></td>
               <td>{portal_email(row.user)}</td>
-              <td>{status_badge(row)}</td>
+              <td>{status_badge(row)} {sandbox_badge(row.user)}</td>
               <td class="text-nowrap">
                 <.action_icon_button
                   :if={Authz.can?(@current_scope, :service_users, :edit_profile)}
@@ -378,6 +413,17 @@ defmodule Prodigy.Portal.AdminLive.Users do
                   data-confirm={"Restore #{row.user.id}?"}
                   title={"Restore #{row.user.id}"}
                   aria-label={"Restore #{row.user.id}"}
+                />
+                <.action_icon_button
+                  :if={Authz.can?(@current_scope, :service_users, :delete)}
+                  icon={:sandbox}
+                  variant={if row.user.sandbox, do: :success, else: :secondary}
+                  spacing="ms-2"
+                  phx-click="toggle_sandbox"
+                  phx-value-id={row.user.id}
+                  data-confirm={sandbox_confirm(row.user)}
+                  title={sandbox_title(row.user)}
+                  aria-label={sandbox_title(row.user)}
                 />
                 <.action_icon_button
                   :if={row.online? and Authz.can?(@current_scope, :service_users, :disconnect)}
@@ -471,6 +517,22 @@ defmodule Prodigy.Portal.AdminLive.Users do
   defp status_label(%{user: %{date_deleted: d}}) when not is_nil(d), do: "deleted"
   defp status_label(%{online?: true}), do: "online"
   defp status_label(_), do: "offline"
+
+  defp sandbox_badge(%{sandbox: true}),
+    do: Phoenix.HTML.raw(~s(<span class="badge text-bg-warning">sandboxed</span>))
+
+  defp sandbox_badge(_user), do: Phoenix.HTML.raw("")
+
+  defp sandbox_title(%{sandbox: true, id: id}), do: "Stop sandboxing #{id}"
+  defp sandbox_title(%{id: id}), do: "Sandbox #{id}"
+
+  defp sandbox_confirm(%{sandbox: true, id: id}),
+    do: "Stop sandboxing #{id}? Their changes will persist again from their next logon."
+
+  defp sandbox_confirm(%{id: id}),
+    do:
+      "Sandbox #{id}? Everything they do will be accepted and acknowledged but " <>
+        "silently discarded. They get no indication. Takes effect at their next logon."
 
   defp status_badge(row) do
     case status_label(row) do
